@@ -1,10 +1,20 @@
 # OMR-Based Offline Test Grading & Topic Analytics
 
+
 ## Why
 
 Most tuition classes still run tests on pen-and-paper, not online. This feature extends instant grading and topic-wise analytics to physical, offline MCQ tests — so classes get AI-driven insights without needing to move testing online.
 
 Teachers never manually tag topics — the AI reads the uploaded question paper once per test and figures out the topic per question itself. Grading each student's OMR sheet is still pure image processing (OpenCV-style bubble detection), so the only AI cost is a single one-time read of the question PDF per test, not per student — cost stays flat no matter how large the class is.
+
+## Accounts & Roles
+
+Two upload actions in this flow belong to two different people, so, for now, two separate logins:
+
+- **Teacher login** — does the test setup (Path A or Path B), reviews/confirms the AI-extracted answer key and topic tags, and views the class-wide analytics dashboard (which topics need re-teaching across the batch).
+- **Student login** — uploads their own filled OMR sheet, and views their own score, right/wrong per question, and topic-wise performance chart.
+
+Kept to just these two roles for now — that's the minimum needed to cover the whole flow end to end (setup + review on one side, upload + results on the other). Additional roles (e.g., an admin/owner login for managing the tuition's teachers and classes) can be layered on later if needed.
 
 ## Test Setup — Two Paths to an Answer Key
 
