@@ -34,7 +34,7 @@ app/
 │   ├── student.py
 │   ├── class_.py                           # Class, ClassEnrollment (trailing underscore — `class` is a keyword)
 │   ├── subject.py                          # Subject, NcertBook
-│   ├── graph_node.py                       # GraphNode, NodeLevel enum, BookIngestionPage, BookIngestionChapter
+│   ├── curriculum_node.py                  # CurriculumNode, NodeLevel enum
 │   ├── test_.py                            # Test, Question, QuestionNodeMap
 │   ├── submission.py                       # Submission, Answer
 │   └── report.py                           # NodeAccuracy, StudentReport, ClassReport — view-only, not tables
@@ -43,8 +43,8 @@ app/
 │   ├── student_repository.py
 │   ├── class_repository.py                 # every query scoped by teacher_id (§ Auth & Tenancy in backend-architecture.md)
 │   ├── subject_repository.py
-│   ├── book_repository.py                  # ncert_books + book_ingestion_pages/chapters staging tables
-│   ├── graph_node_repository.py            # graph_nodes CRUD + the plain-join tree reads
+│   ├── book_repository.py                  # ncert_books
+│   ├── curriculum_node_repository.py       # curriculum_nodes CRUD + the plain-join tree reads
 │   ├── test_repository.py
 │   ├── question_repository.py
 │   ├── submission_repository.py
@@ -54,15 +54,13 @@ app/
 │   ├── auth_router.py                      # /api/auth/teacher, /api/auth/student
 │   ├── class_router.py
 │   ├── subject_router.py
-│   ├── book_router.py                      # ingestion pipeline endpoints
-│   ├── graph_router.py
+│   ├── book_router.py                      # curriculum taxonomy endpoints
 │   ├── test_router.py
 │   ├── submission_router.py
 │   └── report_router.py
 ├── services/
 │   ├── cv_ocr_service.py                   # ICvOcrService — see § Service Layer & Provider Abstraction below
-│   ├── pdf_text_service.py                 # IPdfTextService
-│   ├── embedding_service.py                # IEmbeddingService
+│   ├── pdf_toc_service.py                  # IPdfTocService — bookmark/TOC parsing, not full-text extraction
 │   ├── llm_service.py                      # ILlmService
 │   └── storage_service.py                  # IStorageService
 ├── middleware/
@@ -118,7 +116,7 @@ def err(error: E) -> Err[E]: return Err(error)
 
 ### Rules
 1. **Repositories** always return `Result[T, AppError]`.
-2. **Services** (LLM/embedding/CV/storage) always return `Result[T, AppError]`.
+2. **Services** (LLM/CV/storage) always return `Result[T, AppError]`.
 3. **Routers** are the only place that unwraps a `Result` into an HTTP response — match on `is_ok()`/`is_err()`, never let a repository/service's `Err` silently become a 500 with no context.
 4. **Never `raise`** inside a repository or service, except a `try/except` that immediately converts to `err(...)`.
 5. Propagate errors up unchanged: `result = await SomeRepository.find_by_id(id); if result.is_err(): return err(result.error)`.
@@ -313,7 +311,7 @@ TeacherRepository = TeacherRepositoryImpl()
 
 ## 9. Service Layer & Provider Abstraction
 
-**This is the section that matters most for swappability.** Every external AI/CV/OCR/embedding/storage provider sits behind an interface — routers and other application code only ever depend on the interface, never on a concrete provider class. Swapping Claude for GPT, or Voyage for OpenAI embeddings, or the in-house `cv-ocr-service` for a hosted vendor, is then a **one-file, zero-caller-change** operation.
+**This is the section that matters most for swappability.** Every external AI/CV/OCR/storage provider sits behind an interface — routers and other application code only ever depend on the interface, never on a concrete provider class. Swapping Claude for GPT, or the in-house `cv-ocr-service` for a hosted vendor, is then a **one-file, zero-caller-change** operation.
 
 **File:** `app/services/llm_service.py`
 
@@ -325,18 +323,18 @@ from app.config.settings import settings
 
 # 1. The interface — everything else in the app depends on THIS, never on a concrete class
 class ILlmService(Protocol):
-    async def classify_chapter(self, chapter_text: str) -> Result[ChapterClassification, "AppError"]: ...
-    async def map_question_to_node(self, question_text: str, candidates: List[NodeCandidate]) -> Result[NodeSelection, "AppError"]: ...
-    async def grade_subjective(self, extracted_text: str, model_answer: str | None, keyword_key: list | None) -> Result[SubjectiveGrade, "AppError"]: ...
+    async def map_question_to_node(self, question_text: str, full_taxonomy: List[TaxonomyNode]) -> Result[NodeSelection, "AppError"]: ...
     async def phrase_report(self, evidence: ReportEvidence) -> Result[str, "AppError"]: ...
+    # No grade_subjective() — subjective grading is its own future PR, not a
+    # deferred method on this interface; added alongside the schema it needs.
 
 # 2a. One concrete implementation
 class AnthropicLlmService:
     """Calls Claude via the Anthropic SDK. Implements ILlmService."""
-    async def classify_chapter(self, chapter_text: str) -> Result[ChapterClassification, "AppError"]:
+    async def map_question_to_node(self, question_text: str, full_taxonomy: List[TaxonomyNode]) -> Result[NodeSelection, "AppError"]:
         ...  # Anthropic-specific call, mapped to the shared return shape
 
-    # ... the other three methods, same pattern
+    # ... the other methods, same pattern
 
 # 2b. An alternate implementation — same interface, swap-in replacement
 class OpenAiLlmService:
@@ -370,10 +368,15 @@ The router's code never changes if `LLM_PROVIDER` flips from `"anthropic"` to `"
 | Service | Interface | Swappable providers |
 |---|---|---|
 | `llm_service.py` | `ILlmService` | Anthropic (Claude), OpenAI (GPT), etc. |
-| `embedding_service.py` | `IEmbeddingService` | Voyage AI, OpenAI embeddings, etc. |
-| `cv_ocr_service.py` | `ICvOcrService` | In-house OpenCV/OCR module, or a future hosted vendor — same `detect_bubbles()`/`extract_handwriting()` signatures either way |
-| `pdf_text_service.py` | `IPdfTextService` | Any PDF-parsing library — swappable without touching the ingestion pipeline's calling code |
+| `cv_ocr_service.py` | `ICvOcrService` | AI-vision or a future OpenCV/hosted-vendor swap — `detect_bubbles()` only, no handwriting/OCR method (subjective grading is its own future PR) |
+| `pdf_toc_service.py` | `IPdfTocService` | Any PDF-parsing library that can read bookmarks/outline metadata — swappable without touching any calling code |
 | `storage_service.py` | `IStorageService` | S3, GCS, any S3-compatible provider |
+
+No `embedding_service.py` — dropped entirely, not just deferred. It existed to shortlist
+candidates before a question-mapping AI call; unnecessary once one subject's whole
+curriculum taxonomy is small enough (a few hundred short name+path entries, manually
+entered, no AI-written summaries) to send directly in one prompt. See
+`../curriculum-taxonomy.md` § Mapping Questions onto the Taxonomy.
 
 ### Service rules
 - Every service method returns `Result[T, AppError]` — same discipline as repositories; a provider's SDK exception is caught and converted, never left to propagate.
@@ -430,5 +433,5 @@ Before opening a PR for a new module:
 - [ ] Repository — interface (`Protocol`) + impl class + singleton export, every method `Result`-wrapped, `try/except` → `DATABASE_ERROR`
 - [ ] New errors added to `ERRORS` in `utils/errors.py` (and to the catalog in `backend-architecture.md` §5) — never inline `AppError(...)`
 - [ ] Router — auth via `Depends`, unwraps `Result` via `app_error_to_http_exception`, no manual status codes
-- [ ] If the module calls an external provider (AI/embedding/CV/storage) — goes through the service's **interface**, never a concrete provider class imported directly
+- [ ] If the module calls an external provider (AI/CV/storage) — goes through the service's **interface**, never a concrete provider class imported directly
 - [ ] Repository integration tests (testcontainers) + router unit tests (mocked deps) both added

@@ -69,9 +69,9 @@ someone actually validates it, not before.
 `ICvOcrService` (§ Interface shape below) is the reason this decision isn't a one-way
 door. Whether extraction is "AI-vision reads every sheet" (v1), "pure OpenCV with a
 cached template" (§ Future Optimization), or something else entirely, is an
-implementation detail of one class behind that interface — same pattern as
-`ILlmService`/`IEmbeddingService` in `backend-guide.md` § Service Layer & Provider
-Abstraction. Routers, the submission pipeline, and every other caller only ever depend on
+implementation detail of one class behind that interface — same pattern as `ILlmService`
+in `backend-guide.md` § Service Layer & Provider Abstraction. Routers, the submission
+pipeline, and every other caller only ever depend on
 `ICvOcrService`'s method signatures, never on a concrete implementation — swapping the
 underlying approach is a new implementation class plus a config value, with zero changes
 to any code that calls it.
@@ -164,8 +164,11 @@ same as everything else flagged as unvalidated in this doc.
 ```python
 class ICvOcrService(Protocol):
     async def detect_bubbles(self, image: bytes, test_id: int) -> Result[AnswerMap, "AppError"]: ...
-    async def extract_handwriting(self, image: bytes) -> Result[list[TextRegion], "AppError"]: ...
 ```
+
+MCQ/OMR only — no handwriting/OCR method on this interface at all. Subjective grading is
+its own future PR, not a deferred piece of this one; the method gets added then, alongside
+the schema fields it actually operates on (`database-design.md` § Design Decisions).
 
 `AnswerMap` includes both the answers and the per-question confidence flags described
 above. `test_id` is accepted but unused for caching in v1 — kept in the signature so the

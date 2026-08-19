@@ -1,8 +1,8 @@
 # Learning Management — Database Design (MySQL)
 
-ER diagram and relational schema for the Learning Management platform: OMR/subjective test grading, a curriculum knowledge graph for subtopic-level weak-area reports, and the teacher/class/student roster underneath both.
+ER diagram and relational schema for the Learning Management platform: OMR test grading, a curriculum taxonomy for subtopic-level weak-area reports, and the teacher/class/student roster underneath both.
 
-**v1 — initial schema (2026-08-18).** Covers everything settled so far: [OMR-based grading](../omr-grading.md), [subjective grading](../subjective-grading.md), the [curriculum knowledge graph](../knowledge-graph-analytics.md), and [accounts/roster/tenancy](../accounts-and-roster.md). 11 tables, single database — no per-tenant database split is needed here (unlike SecurePass): a teacher's data isn't legally/physically isolated data belonging to a separate business, it's one row of scoping (`class.teacher_id`) inside one shared app, so row-level tenancy is the right level of isolation, not database-per-tenant.
+**v1 — schema.** Covers everything settled so far: [OMR-based grading](../omr-grading.md), the [curriculum taxonomy](../curriculum-taxonomy.md), and [accounts/roster/tenancy](../accounts-and-roster.md). **Scope: MCQ/OMR only** — [subjective grading](../subjective-grading.md) is fully out of scope for this PR (reviewer feedback), not just deferred-but-present: `model_answer`/`keyword_key`/`ai_summary`/`question_type` are removed from the schema entirely, to come back as their own PR once subjective grading is actually being built — see § Design Decisions. 10 tables, single database — no per-tenant database split is needed here (unlike SecurePass): a teacher's data isn't legally/physically isolated data belonging to a separate business, it's one row of scoping (`class.teacher_id`) inside one shared app, so row-level tenancy is the right level of isolation, not database-per-tenant.
 
 ---
 
@@ -16,13 +16,11 @@ erDiagram
     CLASSES ||--o{ TESTS : "has"
     SUBJECTS ||--o{ TESTS : "is subject of"
     SUBJECTS ||--o{ NCERT_BOOKS : "has textbook"
-    NCERT_BOOKS ||--o{ GRAPH_NODES : "ingested into"
-    GRAPH_NODES ||--o{ GRAPH_NODES : "parent of"
-    NCERT_BOOKS ||--o{ BOOK_INGESTION_PAGES : "staged as"
-    NCERT_BOOKS ||--o{ BOOK_INGESTION_CHAPTERS : "staged as"
+    NCERT_BOOKS ||--o{ CURRICULUM_NODES : "entered from"
+    CURRICULUM_NODES ||--o{ CURRICULUM_NODES : "parent of"
     TESTS ||--o{ QUESTIONS : "contains"
     QUESTIONS ||--o{ QUESTION_NODE_MAP : "mapped via"
-    GRAPH_NODES ||--o{ QUESTION_NODE_MAP : "mapped via"
+    CURRICULUM_NODES ||--o{ QUESTION_NODE_MAP : "mapped via"
     TESTS ||--o{ SUBMISSIONS : "receives"
     STUDENTS ||--o{ SUBMISSIONS : "uploads"
     SUBMISSIONS ||--o{ ANSWERS : "graded into"
@@ -68,33 +66,15 @@ erDiagram
         varchar pdf_url
     }
 
-    GRAPH_NODES {
+    CURRICULUM_NODES {
         bigint id PK
         bigint book_id FK
         bigint parent_id FK "nullable — self-reference, adjacency-list tree"
         enum level "chapter / topic / subtopic"
         varchar name
-        text summary "used only to shortlist candidates when mapping a question"
-        json summary_embedding "small vector, question-routing only — no textbook-chunk RAG, see knowledge-graph-analytics.md"
         int page_start
         int page_end
-    }
-
-    BOOK_INGESTION_PAGES {
-        bigint id PK
-        bigint book_id FK
-        int page_number
-        mediumtext page_text "temporary — deleted once graph_nodes is confirmed"
-    }
-
-    BOOK_INGESTION_CHAPTERS {
-        bigint id PK
-        bigint book_id FK
-        int chapter_number
-        varchar chapter_title
-        int page_start
-        int page_end
-        enum source "bookmark / toc / manual"
+        boolean confirmed "auto-filled chapter/topic start false pending review; subtopics true from creation"
     }
 
     TESTS {
@@ -111,11 +91,8 @@ erDiagram
         bigint test_id FK
         int question_number
         text question_text
-        enum question_type "mcq / subjective"
         decimal max_marks
-        varchar correct_option "MCQ only"
-        text model_answer "subjective only"
-        json keyword_key "subjective only"
+        varchar correct_option
     }
 
     QUESTION_NODE_MAP {
@@ -136,9 +113,7 @@ erDiagram
         bigint submission_id FK
         bigint question_id FK
         text extracted_answer
-        boolean is_correct "MCQ"
-        decimal marks_awarded "subjective partial credit, or MCQ 0/max_marks"
-        text ai_summary "subjective only — what the student wrote"
+        boolean is_correct
         boolean needs_review
         boolean reviewed_by_teacher
     }
@@ -155,17 +130,15 @@ erDiagram
 | 3 | `classes` | A teacher's batch — the tenancy boundary (see [accounts-and-roster.md](../accounts-and-roster.md)) | teacher 1→N |
 | 4 | `class_enrollments` | Roster: which students belong to which class | class 1→N, student 1→N |
 | 5 | `subjects` | Mathematics, Physics, etc. | — |
-| 6 | `ncert_books` | One row per ingested NCERT textbook | subject 1→N |
-| 7 | `graph_nodes` | Knowledge graph: Subject→Chapter→Topic→Subtopic tree, self-referencing | book 1→N, self 1→N (parent) |
-| — | `book_ingestion_pages` | **Temporary staging** — per-page extracted book text, held only during ingestion of one book, deleted once its graph is confirmed | book 1→N |
-| — | `book_ingestion_chapters` | **Temporary staging** — proposed chapter boundaries (from bookmarks/TOC/manual) before admin review confirms them into `graph_nodes` | book 1→N |
+| 6 | `ncert_books` | One row per book the curriculum taxonomy is entered from | subject 1→N |
+| 7 | `curriculum_nodes` | Curriculum taxonomy: Chapter→Topic→Subtopic tree, self-referencing, manually entered (see [curriculum-taxonomy.md](../curriculum-taxonomy.md)) | book 1→N, self 1→N (parent) |
 | 8 | `tests` | One test/exam within a class | class 1→N, subject 1→N |
 | 9 | `questions` | Questions within a test, with answer key / model answer | test 1→N |
-| 10 | `question_node_map` | Question → graph node(s), decided once at test setup | question N↔N, graph_node N↔N |
+| 10 | `question_node_map` | Question → curriculum node(s), decided once at test setup | question N↔N, curriculum_node N↔N |
 | 11 | `submissions` | One scanned/uploaded sheet per student per test | test 1→N, student 1→N |
-| 12 | `answers` | One graded result per question per submission — the roll-up unit for the knowledge-graph report | submission 1→N, question 1→N |
+| 12 | `answers` | One graded result per question per submission — the roll-up unit for the taxonomy report | submission 1→N, question 1→N |
 
-No table stores marks on `graph_nodes` — the graph is shared, read-only reference data; every result lives on `answers` and only *references* a node via `questions` → `question_node_map`. See "Results never touch the graph" below.
+No table stores marks on `curriculum_nodes` — the taxonomy is shared, read-only reference data; every result lives on `answers` and only *references* a node via `questions` → `question_node_map`. See "Results never touch the taxonomy" below.
 
 ---
 
@@ -173,18 +146,19 @@ No table stores marks on `graph_nodes` — the graph is shared, read-only refere
 
 - **Row-level tenancy (`classes.teacher_id`), not database-per-tenant.** Unlike a SaaS product serving separate businesses (where physical isolation is a sales point, see SecurePass's `../../refrence/database-design.md`), every teacher here is a user inside one shared application — a `WHERE teacher_id = ?` (via `classes`) scoping every roster/test/result query is the right level of isolation. See [accounts-and-roster.md](../accounts-and-roster.md).
 - **No `roll_number`, QR code, or sheet-based identification in v1.** MVP identification is login-only — a student uploads their own sheet under their own account, so nothing on the sheet itself needs to identify them, and no standardized template is required (`../omr-grading.md`, current version). These fields were designed and then deliberately removed rather than kept-but-unused, once `../omr-grading.md` §29 confirmed standardized templates/QR/bulk-upload are a named future phase, not MVP scope — add `roll_number` (on `class_enrollments`, unique per class) and a QR-mismatch check back when that phase is actually built. See [accounts-and-roster.md § Future / Phase 2](../accounts-and-roster.md#future--phase-2--teacher-bulk-upload--sheet-based-identification).
-- **Knowledge graph is an adjacency-list tree, not a separate graph database.** `graph_nodes.parent_id` self-references the same table. It's a strict tree with one small many-to-many exception (`question_node_map`) — a dedicated graph database (Neo4j etc.) would add a second datastore to keep in sync with everything else, for traversal patterns this tree doesn't need; worth revisiting only if cross-subject prerequisite links (a true graph, not a tree) become a real requirement later.
-- **`level` is currently a fixed 3-value `ENUM` (chapter/topic/subtopic) — depth is still an open decision, not finalized.** At this fixed, known depth, walking or rolling up the tree is three plain self-joins, no recursion needed. If a level ever needs to go deeper, that's either a small bump to the `ENUM` (still fixed depth, still plain joins) or dropping the `ENUM` for open-ended depth (which then needs `WITH RECURSIVE`, MySQL 8.0.19+, plus an application-level check against `parent_id` cycles). See [knowledge-graph-analytics.md § Open Questions](../knowledge-graph-analytics.md#open-questions) for the full tradeoff — not resolved either way yet.
-- **`summary_embedding` is a small JSON vector, not a full-textbook RAG/vector-DB setup.** Its only job is helping the AI shortlist candidate nodes when mapping a question at test setup — one short vector per node, computed once when the graph is ingested. There is deliberately no chunk-level embedding of the full NCERT text and no separate vector database: the report only needs to point at a page range (`page_start`/`page_end`), not generate content from the textbook itself. See [knowledge-graph-analytics.md § Non-Goals](../knowledge-graph-analytics.md#non-goals-for-now).
-- **`summary_embedding` stays `NULL` until admin review confirms the node.** It's computed by a separate model/API call from the one that generates `name`/`summary`, and admin review can still rename or merge/split nodes after generation — embedding before confirmation risks embedding text that gets edited away. Populated in one batched call across every node in a book once its ingestion is confirmed, not per-node during chapter generation. See [knowledge-graph-analytics.md § Building the Graph](../knowledge-graph-analytics.md#building-the-graph-one-time-ingestion-per-subjectchapter).
+- **Renamed "knowledge graph" → "curriculum taxonomy," table renamed `graph_nodes` → `curriculum_nodes`.** On review, the structure never had multiple relationship types, cross-links, or AI-derived content — it's a plain manually-curated tree, and "graph" overstated that. See [curriculum-taxonomy.md § History](../curriculum-taxonomy.md#history--why-this-simplified-so-much) for the full reasoning.
+- **No `summary`/`summary_embedding` columns, no `book_ingestion_pages`/`book_ingestion_chapters` staging tables, no automated ingestion pipeline.** All dropped, not deferred. The catalog is small and fixed (12 subject-class combinations, 5–10 chapters each), Chapter/Topic names are already printed in the book's own table of contents (no AI judgment needed, no failure mode where AI beats the printed page), and Subtopic — the one level needing real judgment — is a small enough volume (~500–1000 entries total) for direct manual entry by the teacher to be more reliable than an unvalidated AI classification step. See [curriculum-taxonomy.md § History](../curriculum-taxonomy.md#history--why-this-simplified-so-much).
+- **`curriculum_nodes.confirmed`** replaces the old staging-table review flow. Chapter/Topic rows auto-filled by plain PDF bookmark/table-of-contents parsing (not AI — just reading structured data already in the file) start `confirmed = false`; the teacher reviews and confirms or corrects them. Subtopic rows are always manually typed by the teacher and start `confirmed = true` — there's nothing to review since a person entered it directly. This removes the need for separate staging tables entirely: proposed and confirmed data live in the same table, just gated by one boolean.
+- **No `IEmbeddingService`/embedding provider anywhere in the architecture.** It existed to shortlist candidate nodes before an AI call at question-mapping time — unnecessary once one subject's whole taxonomy (a few hundred short name+path entries, no lengthy summaries) is small enough to send directly in a single prompt. See [curriculum-taxonomy.md § Mapping Questions onto the Taxonomy](../curriculum-taxonomy.md#mapping-questions-onto-the-taxonomy).
+- **`level` is a fixed 3-value `ENUM` (chapter/topic/subtopic) — locked, checked against real NCERT content.** A Class 10 Maths chapter ("Circles") confirmed a Subtopic is already a single atomic, testable idea — nothing meaningful to split further, and going deeper would only dilute the "Insufficient Data" reporting threshold and multiply manual-entry workload. At this fixed, known depth, walking or rolling up the tree is three plain self-joins, no recursion needed. See [curriculum-taxonomy.md § Open Questions](../curriculum-taxonomy.md#open-questions) for the full reasoning.
 - **Question → node mapping is locked at test setup, never re-classified.** `tests.published_at` marks that point; `question_node_map` rows don't change after a test goes live, regardless of how many students take it later.
-- **Results never touch the graph.** Every graded result is a row in `answers`, referencing a `question_id` — which node(s) it counts toward is derived by joining through `question_node_map`, not stored redundantly on `answers` or written onto `graph_nodes`. Per-student and class-wide reports are both just different `GROUP BY` scopes over the same `answers` rows, computed on demand, not precomputed onto the graph.
-- **Grading is mechanical, not AI, at submission time.** `answers.is_correct`/`marks_awarded` come from bubble-fill detection + answer-key comparison (MCQ) or OCR + AI partial-credit scoring against `questions.model_answer`/`keyword_key` (subjective) — the only AI cost in the whole pipeline happened once already, when `questions`/`question_node_map` were built at test setup. See [omr-grading.md](../omr-grading.md).
+- **Results never touch the taxonomy.** Every graded result is a row in `answers`, referencing a `question_id` — which node(s) it counts toward is derived by joining through `question_node_map`, not stored redundantly on `answers` or written onto `curriculum_nodes`. Per-student and class-wide reports are both just different `GROUP BY` scopes over the same `answers` rows, computed on demand, not precomputed onto the taxonomy.
+- **Grading is mechanical, not AI, at submission time.** `answers.is_correct` comes from bubble-fill detection + answer-key comparison — the only AI cost in the whole pipeline is the one-time question-mapping call at test setup. See [omr-grading.md](../omr-grading.md).
+- **`question_type`, `model_answer`, `keyword_key`, `ai_summary`, `marks_awarded` are removed entirely, not kept as unused nullable columns.** An earlier draft argued these were cheap enough to keep around "just in case" — reversed on review: subjective grading is a fully separate future PR, not a deferred piece of this one, so the schema for this PR should only describe what it actually builds (MCQ/OMR). `questions` has no type discriminator since every question in scope is MCQ; `answers.is_correct` alone is sufficient for MCQ scoring (score = `is_correct ? max_marks : 0`), so `marks_awarded` isn't needed here either — it was only ever justified by subjective's variable partial credit. All of these come back together, as real columns backing real functionality, when subjective grading is actually built.
 - **`submissions.student_id` is always the uploading student, never nullable.** In v1, a student only ever uploads their own sheet under their own login — there's no teacher-bulk-upload path yet, so there's nothing to resolve identity for later. This was `NULL`-able in an earlier draft to support a manual-match-to-roster fallback; that fallback (along with the QR-mismatch rejection check) only comes back once teacher bulk-upload is actually built (see the `roll_number`/QR decision above).
-- **Book ingestion uses two temporary staging tables, not memory.** `book_ingestion_pages` (per-page extracted text) and `book_ingestion_chapters` (proposed chapter boundaries pending admin review) exist because ingestion spans multiple separate, human-paced requests — upload, review, edit, confirm — that can't rely on server memory surviving between them (process restarts, multiple server instances, or just the admin coming back later would all silently lose in-memory state). Both are plain tables rather than object-storage files: the data is small (a few hundred KB of text per book), and the review screen needs targeted row-level reads/edits (one chapter's page range, one page's text) that a table serves far more naturally than rewriting a flat file. Once a book's `graph_nodes` are confirmed, both tables' rows for that `book_id` are deleted — this is scratch data for building the graph, not part of it. See [knowledge-graph-analytics.md § Building the Graph](../knowledge-graph-analytics.md#building-the-graph-one-time-ingestion-per-subjectchapter).
 - **No `test_layout_templates` table in v1 — extraction reads every sheet directly, no cached layout.** An earlier draft added this table for a cached-template/CV-first design; that approach is now a documented future optimization, not the v1 build, since it carried unvalidated registration/threshold risk that a simpler AI-vision-reads-every-sheet approach avoids entirely. See [omr-extraction-strategy.md § Future Optimization](omr-extraction-strategy.md#future-optimization-not-v1-cached-template-cv-first-detection) for the deferred design and the schema it would need if revisited. **v1 assumes a single-page OMR sheet** (a single `submissions.image_url`) — a multi-page bubble sheet isn't supported yet.
-- **`submissions.image_url` is a single column, not a one-to-many `submission_pages` table — reverted back after a closer look.** A multi-page relation was added, then removed: it exists to support multi-page subjective booklets, which aren't in scope right now (`subjective-grading.md` hasn't even been reconciled with the current `omr-grading.md` yet, and OMR itself is single-page-only). Building that structure now would be exactly the kind of unused-until-later complexity avoided everywhere else in this schema (roll_number, QR, `test_layout_templates`) — reintroduce a multi-page relation when subjective grading is actually being built and multi-page is confirmed necessary, not before. Whenever multi-page support does come back, it should still be plain per-page images, not a bundled PDF — see [omr-extraction-strategy.md § Input format](omr-extraction-strategy.md#input-format) for why.
-- **No difficulty tagging.** Considered and deliberately dropped for v1 — an AI guess at difficulty is unreliable on its own; if added later, the better version is computed from real submitted results (`% of students who got a question right`), not a metadata field guessed at setup time. See [knowledge-graph-analytics.md § Non-Goals](../knowledge-graph-analytics.md#non-goals-for-now).
+- **`submissions.image_url` is a single column, not a one-to-many `submission_pages` table — reverted back after a closer look.** A multi-page relation was added, then removed: it exists to support multi-page subjective booklets, which aren't in scope right now. Building that structure now would be exactly the kind of unused-until-later complexity avoided everywhere else in this schema — reintroduce a multi-page relation when subjective grading is actually being built and multi-page is confirmed necessary, not before. Whenever multi-page support does come back, it should still be plain per-page images, not a bundled PDF — see [omr-extraction-strategy.md § Input format](omr-extraction-strategy.md#input-format) for why.
+- **No difficulty tagging.** Considered and deliberately dropped for v1 — an AI guess at difficulty is unreliable on its own; if added later, the better version is computed from real submitted results (`% of students who got a question right`), not a metadata field guessed at setup time.
 
 ---
 
@@ -192,10 +166,10 @@ No table stores marks on `graph_nodes` — the graph is shared, read-only refere
 
 Neither `ncert_books.pdf_url` nor `submissions.image_url` is a "free" reference to something that just exists somewhere — both need a real file behind them, and the database only ever stores a pointer, never the file bytes.
 
-- **Processing (both books and submissions) uses a temp file, settled, independent of the permanent-storage question below.** An uploaded PDF/image is written to OS-managed temp storage (e.g. Python's `tempfile`) as it's received — never fully buffered in application memory — and whatever reads it (the PDF-text extractor, the CV/OCR service) works off that temp file. The temp file is auto-cleaned once processing is done, or on a schedule if something crashes mid-way. This part doesn't depend on whether a permanent copy gets kept afterward.
-- **`ncert_books.pdf_url` — whether we keep a permanent copy at all is genuinely undecided, not settled.** Earlier drafts of this doc asserted "download once, store our own copy in object storage" as a done decision — that was too strong; it was proposed, not confirmed. The real tradeoff: NCERT publishes textbooks as free PDFs (no licensing cost), but "free to download" isn't the same as "safe to link to directly" — their site could restructure or move a file at any time, breaking any page pointer built from it. Keeping our own permanent copy avoids that, at a small ongoing storage cost (tens of MB per book, one-time). Not keeping one is also possible if the "go read pages 120–125" link either isn't needed, or is allowed to depend on NCERT's own site staying stable. **Neither option is decided yet** — and if NCERT re-hosting terms turn out to disallow keeping our own copy, that would force the decision anyway. Worth resolving before ingestion is actually built, not before this doc exists.
-- **`submissions.image_url` — mandatory object storage, no external source exists.** A student's scanned answer sheet is user-generated content with no free public copy anywhere — it has to be stored somewhere we control from the moment it's uploaded, for as long as it needs to remain available (e.g., for a teacher's manual review or a later dispute). Unlike NCERT books, this isn't optional either way.
-- **Cost, if we do keep permanent copies, is small** — a handful of NCERT textbook PDFs (tens of MB, one-time per book) plus individually small scanned images (a few hundred KB–few MB each, growing with usage) is standard, cheap object-storage usage on any major provider. Not a blocker either way — the open question is whether we need to, not whether we can afford to.
+- **Processing (both books and submissions) uses a temp file, settled, independent of the permanent-storage question below.** An uploaded PDF/image is written to OS-managed temp storage (e.g. Python's `tempfile`) as it's received — never fully buffered in application memory — and whatever reads it (the PDF bookmark/TOC parser, the CV/OCR service) works off that temp file. The temp file is auto-cleaned once processing is done, or on a schedule if something crashes mid-way. This part doesn't depend on whether a permanent copy gets kept afterward.
+- **`ncert_books.pdf_url` — whether we keep a permanent copy at all is genuinely undecided, not settled.** NCERT publishes textbooks as free PDFs (no licensing cost), but "free to download" isn't the same as "safe to link to directly." Their site could restructure or move a file at any time, breaking any page pointer built from it. Keeping our own permanent copy avoids that, at a small ongoing storage cost. Not keeping one is also possible if the "go read pages 120–125" link is allowed to depend on NCERT's own site staying stable. **Neither option is decided yet** — and if NCERT re-hosting terms turn out to disallow keeping our own copy, that would force the decision anyway.
+- **`submissions.image_url` — mandatory object storage, no external source exists.** A student's scanned answer sheet is user-generated content with no free public copy anywhere — it has to be stored somewhere we control from the moment it's uploaded, for as long as it needs to remain available (e.g., for a teacher's manual review or a later dispute).
+- **Cost, if we do keep permanent copies, is small** — a handful of NCERT textbook PDFs (tens of MB, one-time per book) plus individually small scanned images (a few hundred KB–few MB each, growing with usage) is standard, cheap object-storage usage on any major provider.
 
 ---
 
@@ -261,61 +235,26 @@ CREATE TABLE ncert_books (
     INDEX idx_ncert_books_subject (subject_id)
 ) ENGINE=InnoDB;
 
--- Adjacency-list tree (Subject -> Chapter -> Topic -> Subtopic). Shared,
--- read-only reference data — never written to by grading. summary_embedding
--- is a SMALL per-node vector used only to shortlist candidates when mapping
--- a question at test setup; it is not a chunk-level RAG store (see
--- knowledge-graph-analytics.md § Non-Goals). Stored as JSON here since v1
--- doesn't need an ANN index at this scale — cosine similarity computed in
--- application code over a few hundred rows per subject is enough.
-CREATE TABLE graph_nodes (
+-- Adjacency-list tree (Chapter -> Topic -> Subtopic), manually entered —
+-- see curriculum-taxonomy.md. No summary/embedding columns: matching a
+-- question to a node uses the node's own name + path directly, not an
+-- authored description. confirmed distinguishes auto-filled Chapter/Topic
+-- rows (from PDF bookmark/TOC parsing, pending teacher review) from
+-- Subtopic rows (always manually typed, confirmed from creation).
+CREATE TABLE curriculum_nodes (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     book_id BIGINT UNSIGNED NOT NULL,
     parent_id BIGINT UNSIGNED NULL,
     level ENUM('chapter','topic','subtopic') NOT NULL,
     name VARCHAR(200) NOT NULL,
-    summary TEXT NOT NULL,
-    summary_embedding JSON NULL,
     page_start INT NULL,
     page_end INT NULL,
+    confirmed BOOLEAN NOT NULL DEFAULT TRUE,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (book_id) REFERENCES ncert_books(id) ON DELETE CASCADE,
-    FOREIGN KEY (parent_id) REFERENCES graph_nodes(id) ON DELETE CASCADE,
-    INDEX idx_graph_nodes_book (book_id),
-    INDEX idx_graph_nodes_parent (parent_id)
-) ENGINE=InnoDB;
-
--- Temporary staging: per-page extracted text for one book's ingestion,
--- kept page-indexed so a chapter's text can be produced by a plain slice
--- (WHERE page_number BETWEEN ...) once its boundaries are known. Rows for
--- a book_id are deleted once that book's graph_nodes are confirmed — this
--- is ingestion scratch data, never the permanent "book content" store
--- (see § Non-Goals in knowledge-graph-analytics.md).
-CREATE TABLE book_ingestion_pages (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    book_id BIGINT UNSIGNED NOT NULL,
-    page_number INT NOT NULL,
-    page_text MEDIUMTEXT NOT NULL,
-    FOREIGN KEY (book_id) REFERENCES ncert_books(id) ON DELETE CASCADE,
-    UNIQUE KEY uq_book_page (book_id, page_number)
-) ENGINE=InnoDB;
-
--- Temporary staging: proposed chapter boundaries, found via PDF bookmarks,
--- the book's own Table of Contents, or manual admin entry (source records
--- which). Admin-editable in the review screen before ingestion's per-chapter
--- AI step runs on them. Once confirmed, each row becomes exactly one
--- graph_nodes row at level='chapter'; deleted after that, same lifecycle
--- as book_ingestion_pages.
-CREATE TABLE book_ingestion_chapters (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    book_id BIGINT UNSIGNED NOT NULL,
-    chapter_number INT NOT NULL,
-    chapter_title VARCHAR(200) NOT NULL,
-    page_start INT NOT NULL,
-    page_end INT NOT NULL,
-    source ENUM('bookmark','toc','manual') NOT NULL,
-    FOREIGN KEY (book_id) REFERENCES ncert_books(id) ON DELETE CASCADE,
-    UNIQUE KEY uq_book_chapter (book_id, chapter_number)
+    FOREIGN KEY (parent_id) REFERENCES curriculum_nodes(id) ON DELETE CASCADE,
+    INDEX idx_curriculum_nodes_book (book_id),
+    INDEX idx_curriculum_nodes_parent (parent_id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE tests (
@@ -336,30 +275,30 @@ CREATE TABLE tests (
 -- omr-extraction-strategy.md § Future Optimization for the deferred
 -- cached-template design and the schema it would need if ever revisited.
 
+-- MCQ only — no question_type discriminator, no model_answer/keyword_key.
+-- Subjective grading is its own future PR; these come back together then,
+-- not as unused columns kept around now. See § Design Decisions.
 CREATE TABLE questions (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     test_id BIGINT UNSIGNED NOT NULL,
     question_number INT NOT NULL,
     question_text TEXT NOT NULL,
-    question_type ENUM('mcq','subjective') NOT NULL,
     max_marks DECIMAL(6,2) NOT NULL DEFAULT 1.00,
-    correct_option VARCHAR(5) NULL COMMENT 'MCQ only — A/B/C/D',
-    model_answer TEXT NULL COMMENT 'subjective only',
-    keyword_key JSON NULL COMMENT 'subjective only — [{"keyword": "...", "weight": 2}, ...]',
+    correct_option VARCHAR(5) NOT NULL COMMENT 'A/B/C/D',
     FOREIGN KEY (test_id) REFERENCES tests(id) ON DELETE CASCADE,
     UNIQUE KEY uq_test_question_number (test_id, question_number),
     INDEX idx_questions_test (test_id)
 ) ENGINE=InnoDB;
 
--- Question -> graph node, many-to-many (usually one node, occasionally two
--- for a question spanning subtopics). Set once at test setup, immutable
+-- Question -> curriculum node, many-to-many (usually one node, occasionally
+-- two for a question spanning subtopics). Set once at test setup, immutable
 -- once the test is published.
 CREATE TABLE question_node_map (
     question_id BIGINT UNSIGNED NOT NULL,
     node_id BIGINT UNSIGNED NOT NULL,
     PRIMARY KEY (question_id, node_id),
     FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE,
-    FOREIGN KEY (node_id) REFERENCES graph_nodes(id) ON DELETE RESTRICT,
+    FOREIGN KEY (node_id) REFERENCES curriculum_nodes(id) ON DELETE RESTRICT,
     INDEX idx_question_node_map_node (node_id)
 ) ENGINE=InnoDB;
 
@@ -384,18 +323,20 @@ CREATE TABLE submissions (
     INDEX idx_submissions_test (test_id)
 ) ENGINE=InnoDB;
 
--- The "Result record" the knowledge-graph rollup reads: one row per
--- question per submission. Which graph node(s) it counts toward is
--- derived via question_node_map, never stored redundantly here — the
--- graph itself is never written to (see § Design Decisions above).
+-- The "Result record" the curriculum-taxonomy rollup reads: one row per
+-- question per submission. Which node(s) it counts toward is derived via
+-- question_node_map, never stored redundantly here — the taxonomy itself
+-- is never written to (see § Design Decisions above).
+-- No marks_awarded/ai_summary — MCQ scoring is fully derived from is_correct
+-- (score = is_correct ? questions.max_marks : 0). Both come back when
+-- subjective grading (variable partial credit, written-answer summaries)
+-- is actually built, as their own PR.
 CREATE TABLE answers (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     submission_id BIGINT UNSIGNED NOT NULL,
     question_id BIGINT UNSIGNED NOT NULL,
     extracted_answer TEXT NULL,
-    is_correct BOOLEAN NULL COMMENT 'MCQ',
-    marks_awarded DECIMAL(6,2) NULL COMMENT 'subjective partial credit, or MCQ 0/max_marks',
-    ai_summary TEXT NULL COMMENT 'subjective only — what the student wrote',
+    is_correct BOOLEAN NULL,
     needs_review BOOLEAN NOT NULL DEFAULT FALSE,
     reviewed_by_teacher BOOLEAN NOT NULL DEFAULT FALSE,
     FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,

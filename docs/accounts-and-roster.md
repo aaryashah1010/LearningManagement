@@ -20,14 +20,35 @@ Teacher
 
 **Not building yet, but worth naming:** a tuition/institute could have multiple teachers who should share visibility (e.g., an owner/admin who sees across all of that tuition's classes). That maps to the "admin/owner login" already flagged as a possible future role in `omr-grading.md`. If/when that's needed, the structure extends to `Tuition/Org → Teachers → Classes → Students` — the Teacher ↔ Class ↔ Student layer below stays the same either way, so building it first doesn't block adding the org layer later.
 
-## Account Creation — Open Question
+## Student Account Creation — Locked: Teacher-Issued, No Self-Registration
 
-Not yet decided. Two standard patterns, need to pick one:
+**Decided:** the teacher uploads their class list (name + contact per student — a bulk
+list, not one-by-one manual add), and the system creates each student account and issues
+its own credentials. No student self-registration route exists. Fits a tuition where the
+teacher already has the full class list, and it's simpler to build first than an
+invite/join-code flow. Roster management (add/remove/edit, matching a student to a
+`class_enrollments` row) stays with the teacher throughout.
 
-1. **Teacher/admin creates accounts** — teacher adds students to their class roster (name + contact), system generates credentials or an invite; student sets a password on first login. Roster management (add/remove/edit) lives with the teacher.
-2. **Student self-registers, then joins a class** — student signs up independently, then joins a specific teacher's class via a class code or invite link. Teacher still manages who's in their roster, but doesn't create the account itself.
+This resolves the "Option 1 vs Option 2" question from the earlier draft of this section
+in favor of Option 1 (teacher/admin creates accounts) — Option 2 (student self-registers,
+then joins via a code) isn't being built.
 
-Option 1 is generally simpler for tuition-style setups where the teacher already has the class list (especially for younger students). Neither is implemented yet — flagging here so it isn't silently assumed later.
+## Teacher Account Creation — Locked: Same Mechanism as Students, No Self-Service
+
+**Decided:** there's no separate teacher-registration flow at all — **an existing teacher
+creates other teacher accounts the same way they create student accounts**, through one
+account-creation mechanism with a `role` field (`teacher` or `student`) distinguishing
+the two. No self-service public registration, and no admin/owner role needed — that
+dependency from the earlier draft of this section is resolved by not needing an admin
+role in the first place. Teachers creating a `teacher`-role account skip the class
+context (a teacher isn't enrolled anywhere); teachers creating a `student`-role account
+still goes through the bulk class-list upload above.
+
+**Bootstrap:** since account creation always requires an already-existing, already-logged-in
+teacher, the very first teacher account can't come through this mechanism — it has to be
+seeded directly (a one-time DB seed/fixture at setup, not an API route), same pattern as
+seeded admin accounts in other systems. Every teacher after that first one is created by
+an existing teacher.
 
 ## Student Identification on Upload
 
