@@ -34,13 +34,12 @@ ERRORS: dict[str, AppError] = {
     "INVALID_CREDENTIALS": AppError("Invalid email/phone or password", 20004, 401),
     "FORBIDDEN": AppError("Access forbidden", 20005, 403),
     "INVALID_REFRESH_TOKEN": AppError("Invalid refresh token", 20006, 401),
+    "INCORRECT_CURRENT_PASSWORD": AppError("Current password is incorrect", 20007, 401),
     # ─── Classes / Roster (3xxxx) ───────────────────────────────────────
     "CLASS_NOT_FOUND": AppError("Class not found", 30001, 404),
     "STUDENT_NOT_IN_CLASS": AppError("Student is not in this class", 30002, 404),
     "ROLL_NUMBER_TAKEN": AppError("Roll number already in use for this class", 30003, 409),
     "EMAIL_OR_PHONE_TAKEN": AppError("Email or phone is already registered for this role", 30004, 409),
-    "INVALID_ROLE": AppError("role must be 'teacher' or 'student'", 30005, 422),
-    "CLASS_ID_REQUIRED_FOR_STUDENT": AppError("class_id is required when role is 'student'", 30006, 422),
     # ─── Subjects / Books / Curriculum Taxonomy (4xxxx) ─────────────────
     "BOOK_NOT_FOUND": AppError("Book not found", 40001, 404),
     "NODE_BOUNDARY_INVALID": AppError("page_start must be <= page_end", 40002, 422),

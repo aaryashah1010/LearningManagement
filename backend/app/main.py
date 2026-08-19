@@ -9,7 +9,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.database.pool import connect_to_database
 from app.middleware.error_handlers import register_error_handlers
 from app.middleware.rate_limit import limiter
-from app.routers import health_router
+from app.routers import accounts_router, auth_router, class_router, health_router
 from app.utils.errors import ERRORS
 from app.utils.responses import error_response
 
@@ -35,3 +35,6 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
 
 
 app.include_router(health_router.router, prefix="/api")
+app.include_router(auth_router.router)
+app.include_router(accounts_router.router)
+app.include_router(class_router.router)

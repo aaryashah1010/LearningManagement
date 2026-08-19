@@ -2,7 +2,7 @@
 
 ER diagram and relational schema for the Learning Management platform: OMR test grading, a curriculum taxonomy for subtopic-level weak-area reports, and the teacher/class/student roster underneath both.
 
-**v1 — schema.** Covers everything settled so far: [OMR-based grading](../omr-grading.md), the [curriculum taxonomy](../curriculum-taxonomy.md), and [accounts/roster/tenancy](../accounts-and-roster.md). **Scope: MCQ/OMR only** — [subjective grading](../subjective-grading.md) is fully out of scope for this PR (reviewer feedback), not just deferred-but-present: `model_answer`/`keyword_key`/`ai_summary`/`question_type` are removed from the schema entirely, to come back as their own PR once subjective grading is actually being built — see § Design Decisions. 10 tables, single database — no per-tenant database split is needed here (unlike SecurePass): a teacher's data isn't legally/physically isolated data belonging to a separate business, it's one row of scoping (`class.teacher_id`) inside one shared app, so row-level tenancy is the right level of isolation, not database-per-tenant.
+**v1 — schema.** Covers everything settled so far: [OMR-based grading](../omr-grading.md), the [curriculum taxonomy](../curriculum-taxonomy.md), and [accounts/roster/tenancy](../accounts-and-roster.md). **Scope: MCQ/OMR only** — [subjective grading](../subjective-grading.md) is fully out of scope for this PR (reviewer feedback), not just deferred-but-present: `model_answer`/`keyword_key`/`ai_summary`/`question_type` are removed from the schema entirely, to come back as their own PR once subjective grading is actually being built — see § Design Decisions. 10 tables, single database — no per-tenant database split is needed here (unlike SecurePass): a teacher's data isn't legally/physically isolated data belonging to a separate business, it's one shared app used by one trusted teaching staff, so a single shared database is the right level of isolation, not database-per-tenant (see § Design Decisions for the current, revised access-scoping approach).
 
 ---
 
@@ -10,7 +10,6 @@ ER diagram and relational schema for the Learning Management platform: OMR test 
 
 ```mermaid
 erDiagram
-    TEACHERS ||--o{ CLASSES : "owns"
     CLASSES ||--o{ CLASS_ENROLLMENTS : "has roster"
     STUDENTS ||--o{ CLASS_ENROLLMENTS : "enrolled in"
     CLASSES ||--o{ TESTS : "has"
@@ -43,7 +42,6 @@ erDiagram
 
     CLASSES {
         bigint id PK
-        bigint teacher_id FK
         varchar name "e.g. Physics — Class 12 Batch A"
     }
 
@@ -127,7 +125,7 @@ erDiagram
 |---|-------|---------|-------------------|
 | 1 | `teachers` | Teacher accounts | — |
 | 2 | `students` | Student accounts | — |
-| 3 | `classes` | A teacher's batch — the tenancy boundary (see [accounts-and-roster.md](../accounts-and-roster.md)) | teacher 1→N |
+| 3 | `classes` | A batch of students; no owning teacher — any teacher can manage any class (see [accounts-and-roster.md](../accounts-and-roster.md)) | — |
 | 4 | `class_enrollments` | Roster: which students belong to which class | class 1→N, student 1→N |
 | 5 | `subjects` | Mathematics, Physics, etc. | — |
 | 6 | `ncert_books` | One row per book the curriculum taxonomy is entered from | subject 1→N |
@@ -144,7 +142,8 @@ No table stores marks on `curriculum_nodes` — the taxonomy is shared, read-onl
 
 ## 3. Design Decisions
 
-- **Row-level tenancy (`classes.teacher_id`), not database-per-tenant.** Unlike a SaaS product serving separate businesses (where physical isolation is a sales point, see SecurePass's `../../refrence/database-design.md`), every teacher here is a user inside one shared application — a `WHERE teacher_id = ?` (via `classes`) scoping every roster/test/result query is the right level of isolation. See [accounts-and-roster.md](../accounts-and-roster.md).
+- **One shared database, not database-per-tenant.** Unlike a SaaS product serving separate businesses (where physical isolation is a sales point, see SecurePass's `../../refrence/database-design.md`), every teacher here is a user inside one shared application, so a single shared database is the right level of isolation.
+- **No `classes.teacher_id`, no per-teacher access scoping.** `classes` originally had a `teacher_id` FK (recording who created it) plus `WHERE teacher_id = ?` scoping on every roster/test/result query. Both were removed, not just unused: no route or repository call checked ownership anymore, and nothing displayed "created by" anywhere (no frontend yet), so the column was purely unused — same reasoning as dropping `roll_number` below. This can be added back if the product ever needs it — re-add `teacher_id` (or a `class_teachers` join table, for actual co-teaching) and the `WHERE`-clause scoping described in the superseded model — see [accounts-and-roster.md § Tenancy Model](../accounts-and-roster.md) for the full reasoning and what "adding it back" would look like.
 - **No `roll_number`, QR code, or sheet-based identification in v1.** MVP identification is login-only — a student uploads their own sheet under their own account, so nothing on the sheet itself needs to identify them, and no standardized template is required (`../omr-grading.md`, current version). These fields were designed and then deliberately removed rather than kept-but-unused, once `../omr-grading.md` §29 confirmed standardized templates/QR/bulk-upload are a named future phase, not MVP scope — add `roll_number` (on `class_enrollments`, unique per class) and a QR-mismatch check back when that phase is actually built. See [accounts-and-roster.md § Future / Phase 2](../accounts-and-roster.md#future--phase-2--teacher-bulk-upload--sheet-based-identification).
 - **Renamed "knowledge graph" → "curriculum taxonomy," table renamed `graph_nodes` → `curriculum_nodes`.** On review, the structure never had multiple relationship types, cross-links, or AI-derived content — it's a plain manually-curated tree, and "graph" overstated that. See [curriculum-taxonomy.md § History](../curriculum-taxonomy.md#history--why-this-simplified-so-much) for the full reasoning.
 - **No `summary`/`summary_embedding` columns, no `book_ingestion_pages`/`book_ingestion_chapters` staging tables, no automated ingestion pipeline.** All dropped, not deferred. The catalog is small and fixed (12 subject-class combinations, 5–10 chapters each), Chapter/Topic names are already printed in the book's own table of contents (no AI judgment needed, no failure mode where AI beats the printed page), and Subtopic — the one level needing real judgment — is a small enough volume (~500–1000 entries total) for direct manual entry by the teacher to be more reliable than an unvalidated AI classification step. See [curriculum-taxonomy.md § History](../curriculum-taxonomy.md#history--why-this-simplified-so-much).
@@ -198,12 +197,9 @@ CREATE TABLE students (
 
 CREATE TABLE classes (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    teacher_id BIGINT UNSIGNED NOT NULL COMMENT 'tenancy boundary — every roster/test/result query scopes through this',
     name VARCHAR(150) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE RESTRICT,
-    INDEX idx_classes_teacher (teacher_id)
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 -- No roll_number in v1 — identification is login-only (see § Design

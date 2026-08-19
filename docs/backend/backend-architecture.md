@@ -67,28 +67,41 @@ either role** — see § 2.2 for how accounts actually get created (`../accounts
 | POST | `/teacher/login` | public | Email + password → `LoginResponse[TeacherView]` |
 | POST | `/student/login` | public | Email/phone + password → `LoginResponse[StudentView]` |
 | POST | `/refresh-token` | public | Body `{role}` disambiguates which secret/table to re-verify against |
+| PATCH | `/password` | teacher or student | Body `{current_password, new_password}` — verifies the current hash before changing it |
 
 ### 2.2 Accounts & Roster — `/api/accounts`, `/api/classes`
 
-Account creation always requires being authenticated as an existing teacher — one
-mechanism, a `role` field distinguishes creating a teacher vs. a student, no self-service
-registration for either (`../accounts-and-roster.md`). The very first teacher account is
-seeded directly (DB fixture), not created through this route.
+Account creation always requires being authenticated as an existing teacher — no
+self-service registration for either role (`../accounts-and-roster.md`). The very first
+teacher account is seeded directly (DB fixture), not created through this route.
+Teacher and student creation are **separate endpoints**, not one shared route with a
+`role` field — a new teacher is a single ad hoc addition (the creating teacher sets their
+password directly), while students only ever arrive as a class roster (system-issued
+default password, changed via `/api/auth/password` after first login).
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| POST | `/api/accounts/bulk` | teacher | Array of `{role: 'teacher'\|'student', name, email\|phone, class_id?}`. `role: 'teacher'` creates a teacher account, `class_id` ignored. `role: 'student'` creates (or matches an existing student by email/phone) and enrolls them in `class_id` (required, must be one of the caller's own classes) — same bulk class-list-upload behavior as before, just expressed as one shared endpoint instead of a class-nested one. **Single-add is the same call with a one-item array** — no separate non-bulk endpoint; a UI adding one student on the fly and one uploading a 40-row class list both hit this route |
+| POST | `/api/accounts/teachers` | teacher | Body `{name, email, password}` — creates one teacher account with the password the creating teacher chose for them |
+| POST | `/api/accounts/students/bulk` | teacher | Body `{class_id, students: [{name, email?, phone?}]}` — creates (or matches an existing student by email/phone) and enrolls each into `class_id` (any class — no per-teacher ownership check, see § Auth & Tenancy). New accounts get `DEFAULT_STUDENT_PASSWORD` (env-configured, same for every student, changed via `/api/auth/password` after first login) — no per-student password in the request |
 
-Class management stays under `/api/classes`, every route scoped to `current_teacher.id`
-as `teacher_id` — see § Auth & Tenancy.
+Class management stays under `/api/classes`. Any authenticated teacher can act on any
+class — see § Auth & Tenancy for why there's no per-teacher ownership check here.
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| POST | `/` | teacher | Create a class |
-| GET | `/` | teacher | List own classes (paginated) |
+| POST | `/` | teacher | Create a class (no owning teacher recorded — see § Auth & Tenancy) |
+| GET | `/` | teacher | List all classes (paginated) |
 | GET | `/{id}` | teacher | Detail + enrollment count |
 | DELETE | `/{id}/enrollments/{student_id}` | teacher | Remove from roster |
+| PATCH | `/{id}/enrollments/{student_id}` | teacher | Body `{new_class_id}` — move the student from `{id}` to `new_class_id`; atomic, not a remove+re-add from the client's side |
 | GET | `/{id}/enrollments` | teacher | Roster list |
+
+**No `DELETE /{id}` (delete a whole class) — deliberately not built yet.** `tests.class_id`
+already cascades (`ON DELETE CASCADE`), same as `class_enrollments.class_id` — once tests
+exist (Step 3+), deleting a class would silently wipe every test/question/submission/answer
+tied to it, not just the roster. Add this endpoint deliberately once tests exist, alongside
+a real decision on whether to block deletion when tests/submissions reference the class
+(e.g. a `CLASS_HAS_TESTS`-style guard) rather than as a bare cascading delete.
 
 ### 2.3 Subjects & Curriculum Taxonomy — `/api/subjects`, `/api/books`
 
@@ -159,14 +172,17 @@ class TokenData(BaseModel):
     email: str
 ```
 
-**Row-level tenancy, not database-per-tenant** (`database-design.md` § Design Decisions)
-— every teacher-scoped repository call filters by `teacher_id` (via `classes.teacher_id`),
-resolved from the current `TokenData.id` when `role == "teacher"`. One shared connection
-pool; `WHERE` clauses do the isolation.
+**No per-teacher tenancy scoping (revised — see `accounts-and-roster.md` § Tenancy Model,
+reversible if ever needed).** Any authenticated teacher can view/manage any class, student,
+or (once built) test/submission/report, regardless of who created it. `classes` has no
+`teacher_id` column at all — removed, not just unfiltered — so no route or repository call
+has anything to scope by. One shared connection pool, no per-teacher `WHERE` isolation. This
+replaces the earlier row-level-tenancy model; `database-design.md` § Design Decisions still
+describes *why* a shared database was chosen over database-per-tenant, that part is
+unchanged — only the per-teacher access boundary (and the column it depended on) was removed.
 
-- `get_current_teacher` / `get_current_student` — FastAPI dependencies, role check on the decoded token.
-- `require_own_class` — for routes nested under `{class_id}`, additionally verifies `classes.teacher_id == current_teacher.id` before any repository call runs, returning `CLASS_NOT_FOUND` rather than `FORBIDDEN` for another teacher's class (don't reveal it exists).
-- A student's own-data routes (`GET /api/submissions/{id}`, `GET /api/students/{id}/report`) check `current_student.id == {id}` (or, for a submission, that `submissions.student_id == current_student.id`) — students never get a broader "own class" style scope, since they don't own a class.
+- `get_current_teacher` / `get_current_student` — FastAPI dependencies, role check on the decoded token. This is still required — the removed boundary is teacher-vs-teacher, not the teacher/student role split itself.
+- A student's own-data routes (`GET /api/submissions/{id}`, `GET /api/students/{id}/report`) still check `current_student.id == {id}` (or, for a submission, that `submissions.student_id == current_student.id`) — this boundary is unaffected by the tenancy change above; students still only ever see their own data, never another student's.
 
 ---
 
@@ -305,8 +321,8 @@ repository, or pipeline orchestration code.
 
 | Range | Domain | Examples |
 |---|---|---|
-| 2xxxx | Auth | `NO_TOKEN_PROVIDED` 20001·401, `INVALID_AUTH_TOKEN` 20002·401, `TOKEN_EXPIRED` 20003·401, `INVALID_CREDENTIALS` 20004·401, `FORBIDDEN` 20005·403 |
-| 3xxxx | Classes / Roster | `CLASS_NOT_FOUND` 30001·404, `STUDENT_NOT_IN_CLASS` 30002·404, `ROLL_NUMBER_TAKEN` 30003·409, `EMAIL_OR_PHONE_TAKEN` 30004·409 (`POST /api/accounts/bulk`, per-role uniqueness), `INVALID_ROLE` 30005·422, `CLASS_ID_REQUIRED_FOR_STUDENT` 30006·422 |
+| 2xxxx | Auth | `NO_TOKEN_PROVIDED` 20001·401, `INVALID_AUTH_TOKEN` 20002·401, `TOKEN_EXPIRED` 20003·401, `INVALID_CREDENTIALS` 20004·401, `FORBIDDEN` 20005·403, `INVALID_REFRESH_TOKEN` 20006·401, `INCORRECT_CURRENT_PASSWORD` 20007·401 (`PATCH /api/auth/password`) |
+| 3xxxx | Classes / Roster | `CLASS_NOT_FOUND` 30001·404, `STUDENT_NOT_IN_CLASS` 30002·404, `ROLL_NUMBER_TAKEN` 30003·409, `EMAIL_OR_PHONE_TAKEN` 30004·409 (per-role uniqueness, checked by both `POST /api/accounts/teachers` and `POST /api/accounts/students/bulk`) |
 | 4xxxx | Subjects / Books / Curriculum Taxonomy | `BOOK_NOT_FOUND` 40001·404, `NODE_BOUNDARY_INVALID` 40002·422 (`page_start > page_end`), `NODE_NOT_CONFIRMED` 40003·409 (test setup referencing an unconfirmed Chapter/Topic), `PDF_TOC_PARSE_FAILED` 40004·502 (falls back to a blank manual-entry screen rather than failing outright), `SUBJECT_NOT_FOUND` 40005·404, `CURRICULUM_NODE_NOT_FOUND` 40006·404 |
 | 5xxxx | Tests / Questions | `TEST_NOT_FOUND` 50001·404, `TEST_ALREADY_PUBLISHED` 50002·409, `QUESTION_PAPER_PARSE_FAILED` 50003·502, `NODE_NOT_IN_SUBJECT_SCOPE` 50004·422, `QUESTION_NOT_FOUND` 50005·404 |
 | 6xxxx | Submissions / Grading | `SUBMISSION_NOT_FOUND` 60001·404, `DUPLICATE_SUBMISSION` 60002·409 (`UNIQUE (test_id, student_id)`), `ANSWER_NOT_FOUND` 60003·404 — `QR_STUDENT_MISMATCH`/`ROLL_NUMBER_MISMATCH`/`MATCH_ALREADY_RESOLVED` deferred to Phase 2 with the identification features they belong to |

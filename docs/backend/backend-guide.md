@@ -44,7 +44,7 @@ app/
 ├── repositories/
 │   ├── teacher_repository.py               #  + test_teacher_repository.py (testcontainers) for every repository
 │   ├── student_repository.py
-│   ├── class_repository.py                 # every query scoped by teacher_id (§ Auth & Tenancy in backend-architecture.md)
+│   ├── class_repository.py                 # no per-teacher scoping — any teacher can act on any class (§ Auth & Tenancy in backend-architecture.md)
 │   ├── subject_repository.py
 │   ├── book_repository.py                  # ncert_books
 │   ├── curriculum_node_repository.py       # curriculum_nodes CRUD + the plain-join tree reads
@@ -54,7 +54,8 @@ app/
 │   ├── answer_repository.py
 │   └── report_repository.py                # read-only rollup queries
 ├── routers/
-│   ├── auth_router.py                      # /api/auth/teacher, /api/auth/student
+│   ├── auth_router.py                      # /api/auth — login, refresh-token, password
+│   ├── accounts_router.py                  # /api/accounts — teacher/student account creation, separate endpoints (see accounts-and-roster.md)
 │   ├── class_router.py
 │   ├── subject_router.py
 │   ├── book_router.py                      # curriculum taxonomy endpoints
@@ -121,14 +122,14 @@ def err(error: E) -> Err[E]: return Err(error)
 2. **Services** (LLM/CV/storage) always return `Result[T, AppError]`.
 3. **Routers** are the only place that unwraps a `Result` into an HTTP response — match on `is_ok()`/`is_err()` and return `error_response()`/`success_response()` directly. **Never raise** for a Result-derived error — the one exception is the auth `Depends()` boundary, which structurally can't return past its own failure (see §10).
 4. **Never `raise`** inside a repository or service, except a `try/except` that immediately converts to `err(...)`.
-5. Propagate errors up unchanged: `result = await SomeRepository.find_by_id(id); if result.is_err(): return err(result.error)`.
+5. Propagate errors up unchanged: `result = SomeRepository.find_by_id(id); if result.is_err(): return err(result.error)`.
 
 ```python
 # In a router:
 from fastapi.responses import JSONResponse
 from app.utils.responses import error_response, success_response
 
-result = await TestRepository.find_by_id(test_id)
+result = TestRepository.find_by_id(test_id)
 if result.is_err():
     error = result.error
     return JSONResponse(status_code=error.status_code, content=error_response(error.message, error.code))
@@ -293,22 +294,22 @@ from app.models.teacher import Teacher, TeacherView
 from app.utils.result import Result, ok, err
 from app.utils.errors import ERRORS
 from app.utils.logger import get_logger
-from app.database.pool import get_pool
+from app.database.pool import execute, fetch_all, fetch_one
 
 logger = get_logger("teacher_repository")
 
-# 1. Define the interface
+# 1. Define the interface — plain sync methods, not async: mysql-connector-python (our
+# driver) has no async support, so fetch_all/fetch_one/execute in pool.py are sync too.
 class ITeacherRepository(Protocol):
-    async def find_by_email(self, email: str) -> Result[List[Teacher], "AppError"]: ...
-    async def find_by_id(self, teacher_id: int) -> Result[Teacher, "AppError"]: ...
-    async def create(self, name: str, email: str, password_hash: str) -> Result[Teacher, "AppError"]: ...
+    def find_by_email(self, email: str) -> Result[List[Teacher], "AppError"]: ...
+    def find_by_id(self, teacher_id: int) -> Result[Teacher, "AppError"]: ...
+    def create(self, name: str, email: str, password_hash: str) -> Result[Teacher, "AppError"]: ...
 
 # 2. Implement the class
 class TeacherRepositoryImpl:
-    async def find_by_email(self, email: str) -> Result[List[Teacher], "AppError"]:
+    def find_by_email(self, email: str) -> Result[List[Teacher], "AppError"]:
         try:
-            pool = get_pool()
-            rows = await pool.fetch_all(
+            rows = fetch_all(
                 "SELECT id, name, email, password_hash, created_at FROM teachers WHERE email = %s",
                 (email,),
             )
@@ -317,25 +318,23 @@ class TeacherRepositoryImpl:
             logger.exception("Error finding teacher by email")
             return err(ERRORS["DATABASE_ERROR"])
 
-    async def find_by_id(self, teacher_id: int) -> Result[Teacher, "AppError"]:
+    def find_by_id(self, teacher_id: int) -> Result[Teacher, "AppError"]:
         try:
-            pool = get_pool()
-            row = await pool.fetch_one("SELECT * FROM teachers WHERE id = %s", (teacher_id,))
+            row = fetch_one("SELECT * FROM teachers WHERE id = %s", (teacher_id,))
             if row is None:
-                return err(ERRORS["TEACHER_NOT_FOUND"])
+                return err(ERRORS["RESOURCE_NOT_FOUND"])
             return ok(Teacher(**row))
         except Exception:
             logger.exception("Error fetching teacher by id")
             return err(ERRORS["DATABASE_ERROR"])
 
-    async def create(self, name: str, email: str, password_hash: str) -> Result[Teacher, "AppError"]:
+    def create(self, name: str, email: str, password_hash: str) -> Result[Teacher, "AppError"]:
         try:
-            pool = get_pool()
-            new_id = await pool.execute(
+            new_id = execute(
                 "INSERT INTO teachers (name, email, password_hash) VALUES (%s, %s, %s)",
                 (name, email, password_hash),
             )
-            return await self.find_by_id(new_id)
+            return self.find_by_id(new_id)
         except Exception:
             logger.exception("Error creating teacher")
             return err(ERRORS["DATABASE_ERROR"])
@@ -442,26 +441,21 @@ from fastapi.responses import JSONResponse
 from app.middleware.auth import get_current_teacher
 from app.repositories.class_repository import ClassRepository
 from app.types.token import TokenData
-from app.utils.errors import ERRORS
 from app.utils.responses import error_response, success_response
 
 router = APIRouter(prefix="/api/classes", tags=["classes"])
 
 @router.get("/{class_id}")
 async def get_class(class_id: int, teacher: TokenData = Depends(get_current_teacher)):
-    result = await ClassRepository.find_by_id(class_id)
+    result = ClassRepository.find_by_id(class_id)
     if result.is_err():
         error = result.error
         return JSONResponse(status_code=error.status_code, content=error_response(error.message, error.code))
-    class_ = result.value
-    if class_.teacher_id != teacher.id:
-        error = ERRORS["CLASS_NOT_FOUND"]  # don't reveal another teacher's class exists
-        return JSONResponse(status_code=error.status_code, content=error_response(error.message, error.code))
-    return success_response(class_)
+    return success_response(result.value)
 ```
 
 ### Router rules
-- Auth/role checks are FastAPI **dependencies** (`Depends(get_current_teacher)`, `Depends(require_own_class)`), not manual `if` checks scattered per-route — same intent as the Node guide's middleware chain (`authenticate → requireX → validateRequest → handler`), expressed as FastAPI's own dependency system. This is the *one* place the app is allowed to raise (`Depends()` can only short-circuit by raising — there's no way for a dependency to "return" an error the way a route body can), and even there it raises via `app_error_to_http_exception` (`utils/responses.py`), which builds its body from the same `error_response()` helper, so the JSON shape is identical either way.
+- Auth/role checks are FastAPI **dependencies** (`Depends(get_current_teacher)`), not manual `if` checks scattered per-route — same intent as the Node guide's middleware chain (`authenticate → requireX → validateRequest → handler`), expressed as FastAPI's own dependency system. This is the *one* place the app is allowed to raise (`Depends()` can only short-circuit by raising — there's no way for a dependency to "return" an error the way a route body can), and even there it raises via `app_error_to_http_exception` (`utils/responses.py`), which builds its body from the same `error_response()` helper, so the JSON shape is identical either way. There's no per-teacher ownership dependency (no `require_own_class`) — any teacher can act on any class, see `accounts-and-roster.md` § Tenancy Model.
 - **Routers never raise for a Result-derived error.** Match on `is_err()` and return a `JSONResponse` built from `error_response()`/`success_response()` directly — never `raise HTTPException(...)`, and never hand-build the response dict inline. The error `code` always comes from an `ERRORS[...]` entry, never typed by hand at the call site.
 - Request/response bodies are Pydantic models — FastAPI validates them automatically; no separate manual validation step is needed (this replaces the Node guide's Zod `validate-request` middleware). A validation failure still surfaces through `error_response()` — see the `RequestValidationError` handler in `middleware/error_handlers.py`, which exists as a safety net, not something routers call into directly.
 

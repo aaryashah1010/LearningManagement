@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     JWT_AUTH_TOKEN_EXPIRE_MINUTES: int = 60
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
+    # Issued to every new student account created via POST /api/accounts/students/bulk.
+    DEFAULT_STUDENT_PASSWORD: str
+
     LLM_PROVIDER: Literal["anthropic", "openai", "gemini"]
     LLM_API_KEY: str
 

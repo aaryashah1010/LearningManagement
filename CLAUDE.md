@@ -7,18 +7,21 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 ## 0. Project Structure
 
 - `backend/` — Python + FastAPI, `app/utils/result.py` Result pattern (no stray exceptions
-  from business logic), row-level tenancy (not database-per-tenant — one shared MySQL
-  database, every teacher-scoped query filters by `teacher_id`). Style guide:
-  `docs/backend/backend-guide.md`. Module/endpoint inventory, pipelines, error catalog:
-  `docs/backend/backend-architecture.md`. Schema source of truth: `docs/backend/database-design.md`.
-  OMR extraction design: `docs/backend/omr-extraction-strategy.md`.
+  from business logic), one shared MySQL database (not database-per-tenant). No per-teacher
+  access scoping — any authenticated teacher can act on any class/student; `classes` has no
+  `teacher_id` column (removed, reversible if this is ever needed — see
+  `accounts-and-roster.md` § Tenancy Model). Style guide: `docs/backend/backend-guide.md`.
+  Module/endpoint inventory, pipelines, error catalog: `docs/backend/backend-architecture.md`.
+  Schema source of truth: `docs/backend/database-design.md`. OMR extraction design:
+  `docs/backend/omr-extraction-strategy.md`.
 - No frontend yet — web vs. native app is still an open decision, not started.
 - `docs/` — all product and architecture docs. Check here before assuming something isn't
   documented: `omr-grading.md` (current OMR/MCQ scope), `subjective-grading.md` (**out of
   scope for now** — its own future PR, nothing subjective-specific should appear in
   `backend/`), `curriculum-taxonomy.md` (the manually-entered Chapter→Topic→Subtopic tree
   — no AI ingestion pipeline, no embeddings, locked at 3 levels), `accounts-and-roster.md`
-  (Teacher↔Class↔Student tenancy, teacher-issued accounts only, no self-registration).
+  (Teacher/Class/Student model, shared teacher visibility, teacher-issued accounts only,
+  no self-registration).
 - `refrence/` — a different project's docs, kept only as a style reference for the
   Result-pattern/repository conventions this project's own `backend-guide.md` was adapted
   from. Not part of this product — never treat its content as this project's own design.

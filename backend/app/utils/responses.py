@@ -15,7 +15,7 @@ def success_response(data: Any, message: str | None = None) -> dict:
     timestamp = datetime.now(UTC).isoformat()
 
     if isinstance(data, Paginated):
-        data = data.model_dump()
+        data = data.model_dump(mode="json")
 
     if _is_paginated(data):
         return {

@@ -4,45 +4,65 @@
 
 [OMR grading](omr-grading.md) and [subjective grading](subjective-grading.md) both assume "a teacher login" and "a student login" exist, but neither says how those accounts come to exist, who manages the roster, or what stops one teacher from seeing another teacher's students. This doc covers that foundation — it's not specific to either grading module, both depend on it.
 
-## Tenancy Model — Teacher ↔ Class ↔ Student
+## Tenancy Model — Shared Visibility, No Per-Teacher Scoping (Revised)
 
-Data must be scoped, not globally visible. The natural boundary is the **class** (a.k.a. batch) — a group of students belonging to one teacher, for one subject/section:
+**Decided:** for now, all teachers share visibility over all classes and students — there is
+no per-teacher ownership boundary. Any authenticated teacher can view/manage any class,
+enroll/transfer/remove any student, and (once built) any test/submission/report, regardless
+of who created it. `classes` has **no `teacher_id` column at all** — it was removed
+entirely, not just left unused, since nothing read it (no access check, no "created by"
+display — there's no frontend yet).
 
 ```
-Teacher
+Teacher (any)
   └─ Class (batch)
         └─ Students (enrolled)
 ```
 
-- A teacher only sees/manages students, tests, and results within **their own classes** — never another teacher's, even within the same tuition center.
-- Every roster, test-setup, and results/report query is filtered by "classes this teacher owns." This is the minimum needed to prevent cross-teacher data leakage.
-- A student can belong to more than one class (e.g., separate Math and Physics classes, possibly different teachers).
+This fits a small tuition where the teaching staff already trust each other and effectively
+work as one team — a per-teacher access boundary was solving a problem that doesn't exist yet
+at that scale, and was adding real complexity (every list/detail query needed an ownership
+check, plus a column nothing else used) for no current benefit.
 
-**Not building yet, but worth naming:** a tuition/institute could have multiple teachers who should share visibility (e.g., an owner/admin who sees across all of that tuition's classes). That maps to the "admin/owner login" already flagged as a possible future role in `omr-grading.md`. If/when that's needed, the structure extends to `Tuition/Org → Teachers → Classes → Students` — the Teacher ↔ Class ↔ Student layer below stays the same either way, so building it first doesn't block adding the org layer later.
+**This is explicitly reversible — not a one-way door.** If the product ever actually needs
+per-teacher or per-institute separation (e.g. a tuition wants teachers walled off from each
+other, or an admin/owner role needs to see across teachers), add it back:
+1. Re-add `classes.teacher_id` (FK to `teachers`, `NOT NULL`) — or, for real co-teaching
+   support, a `class_teachers` join table instead of a single owner column.
+2. Re-add the ownership check each route lost (`_ensure_own_class`-style: fetch, compare,
+   return `CLASS_NOT_FOUND` on mismatch rather than `FORBIDDEN`, so existence isn't leaked)
+   and scope `list_all`/roster/test/result queries by it again.
+
+The underlying Teacher/Class/Student shape is unchanged either way — this was a deliberate,
+scoped simplification (same pattern as dropping `roll_number` in `database-design.md` §
+Design Decisions), not a design dead end.
 
 ## Student Account Creation — Locked: Teacher-Issued, No Self-Registration
 
 **Decided:** the teacher uploads their class list (name + contact per student — a bulk
-list, not one-by-one manual add), and the system creates each student account and issues
-its own credentials. No student self-registration route exists. Fits a tuition where the
-teacher already has the full class list, and it's simpler to build first than an
-invite/join-code flow. Roster management (add/remove/edit, matching a student to a
-`class_enrollments` row) stays with the teacher throughout.
+list, not one-by-one manual add), via `POST /api/accounts/students/bulk`, and the system
+creates each student account and issues its own credentials — every new student gets the
+same system-wide default password (`DEFAULT_STUDENT_PASSWORD`, env-configured, not
+per-student), which they're expected to change via `PATCH /api/auth/password` after their
+first login. No student self-registration route exists. Fits a tuition where the teacher
+already has the full class list, and a shared default is simpler to build and hand out
+than generating/tracking a unique password per student. Roster management (add/remove/edit,
+matching a student to a `class_enrollments` row) stays with the teacher throughout.
 
 This resolves the "Option 1 vs Option 2" question from the earlier draft of this section
 in favor of Option 1 (teacher/admin creates accounts) — Option 2 (student self-registers,
 then joins via a code) isn't being built.
 
-## Teacher Account Creation — Locked: Same Mechanism as Students, No Self-Service
+## Teacher Account Creation — Locked: Separate Endpoint, No Self-Service
 
-**Decided:** there's no separate teacher-registration flow at all — **an existing teacher
-creates other teacher accounts the same way they create student accounts**, through one
-account-creation mechanism with a `role` field (`teacher` or `student`) distinguishing
-the two. No self-service public registration, and no admin/owner role needed — that
-dependency from the earlier draft of this section is resolved by not needing an admin
-role in the first place. Teachers creating a `teacher`-role account skip the class
-context (a teacher isn't enrolled anywhere); teachers creating a `student`-role account
-still goes through the bulk class-list upload above.
+**Decided:** there's no self-registration route for teachers either — **an existing
+teacher creates other teacher accounts**, but through its own endpoint
+(`POST /api/accounts/teachers`), separate from student creation rather than one shared
+mechanism with a `role` field. A new teacher account is a rare, one-at-a-time addition
+(unlike a 30-row class roster), so the creating teacher supplies that new teacher's
+password directly in the request — no default-password mechanism needed there. No
+admin/owner role needed — that dependency from the earlier draft of this section is
+resolved by not needing an admin role in the first place.
 
 **Bootstrap:** since account creation always requires an already-existing, already-logged-in
 teacher, the very first teacher account can't come through this mechanism — it has to be
