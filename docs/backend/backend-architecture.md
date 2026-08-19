@@ -39,7 +39,8 @@ it directly (see conversation history / team discussion):
 ## 1. Stack
 
 FastAPI (async) · `mysql-connector-python`/`SQLAlchemy Core` · Pydantic v2 ·
-`python-jose` (JWT) · `passlib[bcrypt]` · `structlog` · `slowapi` (rate limiting) ·
+`python-jose` (JWT) · `bcrypt` (password hashing) · stdlib `logging` (rotating file
+handlers, gzip on rotate — see `app/utils/logger.py`) · `slowapi` (rate limiting) ·
 pytest + `pytest-asyncio` + `testcontainers` · Docker Compose (app + MySQL 8) ·
 OpenCV (`opencv-python`) + an OCR library, used directly inside `cv_ocr_service.py` —
 no separate microservice (see § 0 above).
@@ -304,10 +305,11 @@ repository, or pipeline orchestration code.
 
 | Range | Domain | Examples |
 |---|---|---|
-| 3xxxx | Classes / Roster | `CLASS_NOT_FOUND` 30001·404, `STUDENT_NOT_IN_CLASS` 30002·404, `ROLL_NUMBER_TAKEN` 30003·409 |
-| 4xxxx | Subjects / Books / Curriculum Taxonomy | `BOOK_NOT_FOUND` 40001·404, `NODE_BOUNDARY_INVALID` 40002·422 (`page_start > page_end`), `NODE_NOT_CONFIRMED` 40003·409 (test setup referencing an unconfirmed Chapter/Topic), `PDF_TOC_PARSE_FAILED` 40004·502 (falls back to a blank manual-entry screen rather than failing outright) |
-| 5xxxx | Tests / Questions | `TEST_NOT_FOUND` 50001·404, `TEST_ALREADY_PUBLISHED` 50002·409, `QUESTION_PAPER_PARSE_FAILED` 50003·502, `NODE_NOT_IN_SUBJECT_SCOPE` 50004·422 |
-| 6xxxx | Submissions / Grading | `SUBMISSION_NOT_FOUND` 60001·404, `DUPLICATE_SUBMISSION` 60002·409 (`UNIQUE (test_id, student_id)`) — `QR_STUDENT_MISMATCH`/`ROLL_NUMBER_MISMATCH`/`MATCH_ALREADY_RESOLVED` deferred to Phase 2 with the identification features they belong to |
+| 2xxxx | Auth | `NO_TOKEN_PROVIDED` 20001·401, `INVALID_AUTH_TOKEN` 20002·401, `TOKEN_EXPIRED` 20003·401, `INVALID_CREDENTIALS` 20004·401, `FORBIDDEN` 20005·403 |
+| 3xxxx | Classes / Roster | `CLASS_NOT_FOUND` 30001·404, `STUDENT_NOT_IN_CLASS` 30002·404, `ROLL_NUMBER_TAKEN` 30003·409, `EMAIL_OR_PHONE_TAKEN` 30004·409 (`POST /api/accounts/bulk`, per-role uniqueness), `INVALID_ROLE` 30005·422, `CLASS_ID_REQUIRED_FOR_STUDENT` 30006·422 |
+| 4xxxx | Subjects / Books / Curriculum Taxonomy | `BOOK_NOT_FOUND` 40001·404, `NODE_BOUNDARY_INVALID` 40002·422 (`page_start > page_end`), `NODE_NOT_CONFIRMED` 40003·409 (test setup referencing an unconfirmed Chapter/Topic), `PDF_TOC_PARSE_FAILED` 40004·502 (falls back to a blank manual-entry screen rather than failing outright), `SUBJECT_NOT_FOUND` 40005·404, `CURRICULUM_NODE_NOT_FOUND` 40006·404 |
+| 5xxxx | Tests / Questions | `TEST_NOT_FOUND` 50001·404, `TEST_ALREADY_PUBLISHED` 50002·409, `QUESTION_PAPER_PARSE_FAILED` 50003·502, `NODE_NOT_IN_SUBJECT_SCOPE` 50004·422, `QUESTION_NOT_FOUND` 50005·404 |
+| 6xxxx | Submissions / Grading | `SUBMISSION_NOT_FOUND` 60001·404, `DUPLICATE_SUBMISSION` 60002·409 (`UNIQUE (test_id, student_id)`), `ANSWER_NOT_FOUND` 60003·404 — `QR_STUDENT_MISMATCH`/`ROLL_NUMBER_MISMATCH`/`MATCH_ALREADY_RESOLVED` deferred to Phase 2 with the identification features they belong to |
 | 7xxxx | Reports | `NO_RESULTS_YET` 70001·404 |
 | 8xxxx | Files / Storage | `FILE_TOO_LARGE` 80001·413, `INVALID_FILE_TYPE` 80002·422, `STORAGE_UPLOAD_FAILED` 80003·502 |
 | 9xxxx | External Services (CV/OCR/AI) | `CV_OCR_ERROR` 90001·502, `LLM_SERVICE_ERROR` 90002·502, `LOW_CONFIDENCE_EXTRACTION` 90003·422 (routes to `needs_review` rather than failing) |
