@@ -1,0 +1,434 @@
+# Learning Management Backend — Code Style Guide (Python / FastAPI)
+
+> Companion to `backend-architecture.md` (what we build — modules, endpoints, pipelines).
+> This doc defines **how** code is written. Adapted from this team's Node/TS style
+> (`refrence/BACKEND_GUIDE.md`) to Python — same underlying discipline (explicit
+> `Result` types, no stray exceptions from business logic, interface-first services),
+> different syntax.
+
+---
+
+## 1. Stack
+
+FastAPI (async) · `mysql-connector-python` (async pool) or `SQLAlchemy Core` (no ORM —
+see `database-design.md`, the schema is hand-written, not ORM-generated) · Pydantic v2
+(request/response models + settings) · `python-jose` (JWT) · `passlib[bcrypt]` ·
+`structlog` or stdlib `logging` · `slowapi` (rate limiting) · pytest + `pytest-asyncio` +
+`testcontainers` · Docker Compose (app + MySQL 8 + any provider stubs for tests).
+
+---
+
+## 2. Project Structure
+
+```
+app/
+├── main.py                                 # Bootstrap: middleware → routers → exception handlers
+├── config/
+│   └── settings.py                         # Pydantic Settings — ALL env reads (DB_*, JWT_*, LLM_PROVIDER, EMBEDDING_PROVIDER, S3_*)
+├── database/
+│   ├── pool.py                             # Single MySQL connection pool (row-level tenancy — no per-tenant split)
+│   ├── schema.sql                          # Full DDL — database-design.md §5 is the source of truth
+│   └── seed.sql                            # Local dev seed data
+├── models/
+│   ├── teacher.py                          # Pydantic models: Teacher, TeacherView, CreateTeacherData
+│   ├── student.py
+│   ├── class_.py                           # Class, ClassEnrollment (trailing underscore — `class` is a keyword)
+│   ├── subject.py                          # Subject, NcertBook
+│   ├── graph_node.py                       # GraphNode, NodeLevel enum, BookIngestionPage, BookIngestionChapter
+│   ├── test_.py                            # Test, Question, QuestionNodeMap
+│   ├── submission.py                       # Submission, Answer
+│   └── report.py                           # NodeAccuracy, StudentReport, ClassReport — view-only, not tables
+├── repositories/
+│   ├── teacher_repository.py               #  + test_teacher_repository.py (testcontainers) for every repository
+│   ├── student_repository.py
+│   ├── class_repository.py                 # every query scoped by teacher_id (§ Auth & Tenancy in backend-architecture.md)
+│   ├── subject_repository.py
+│   ├── book_repository.py                  # ncert_books + book_ingestion_pages/chapters staging tables
+│   ├── graph_node_repository.py            # graph_nodes CRUD + the plain-join tree reads
+│   ├── test_repository.py
+│   ├── question_repository.py
+│   ├── submission_repository.py
+│   ├── answer_repository.py
+│   └── report_repository.py                # read-only rollup queries
+├── routers/
+│   ├── auth_router.py                      # /api/auth/teacher, /api/auth/student
+│   ├── class_router.py
+│   ├── subject_router.py
+│   ├── book_router.py                      # ingestion pipeline endpoints
+│   ├── graph_router.py
+│   ├── test_router.py
+│   ├── submission_router.py
+│   └── report_router.py
+├── services/
+│   ├── cv_ocr_service.py                   # ICvOcrService — see § Service Layer & Provider Abstraction below
+│   ├── pdf_text_service.py                 # IPdfTextService
+│   ├── embedding_service.py                # IEmbeddingService
+│   ├── llm_service.py                      # ILlmService
+│   └── storage_service.py                  # IStorageService
+├── middleware/
+│   ├── auth.py                             # get_current_teacher, get_current_student, require_own_class (FastAPI dependencies)
+│   ├── error_handlers.py                   # exception handlers registered on the app
+│   └── rate_limit.py
+├── types/
+│   ├── pagination.py                       # Paginated[T]
+│   ├── auth_response.py                    # LoginResponse[T]
+│   └── token.py                            # TokenData
+└── utils/
+    ├── errors.py                           # AppError + ERRORS catalog (§5 of backend-architecture.md)
+    ├── responses.py                        # success_response / error_response
+    ├── logger.py                           # get_logger(name)
+    ├── jwt.py                              # create_auth_token / create_refresh_token / decoders
+    ├── result.py                           # Result[T, E] — see § The Result Pattern below
+    └── cosine.py                           # brute-force cosine similarity over a small in-memory row set
+```
+
+Root: `Dockerfile`, `docker-compose.yml` (services `mysql`, `backend`), `.env.example`, `pyproject.toml`, `pytest.ini`.
+
+---
+
+## 3. The Result Pattern
+
+Same discipline as the Node projects' `neverthrow` usage — explicit success/failure values, never a stray exception surfacing from business logic. Python doesn't have `neverthrow`, so a small local wrapper does the same job:
+
+```python
+# app/utils/result.py
+from dataclasses import dataclass
+from typing import Generic, TypeVar, Union
+
+T = TypeVar("T")
+E = TypeVar("E")
+
+@dataclass(frozen=True)
+class Ok(Generic[T]):
+    value: T
+    def is_ok(self) -> bool: return True
+    def is_err(self) -> bool: return False
+
+@dataclass(frozen=True)
+class Err(Generic[E]):
+    error: E
+    def is_ok(self) -> bool: return False
+    def is_err(self) -> bool: return True
+
+Result = Union[Ok[T], Err[E]]
+
+def ok(value: T) -> Ok[T]: return Ok(value)
+def err(error: E) -> Err[E]: return Err(error)
+```
+
+### Rules
+1. **Repositories** always return `Result[T, AppError]`.
+2. **Services** (LLM/embedding/CV/storage) always return `Result[T, AppError]`.
+3. **Routers** are the only place that unwraps a `Result` into an HTTP response — match on `is_ok()`/`is_err()`, never let a repository/service's `Err` silently become a 500 with no context.
+4. **Never `raise`** inside a repository or service, except a `try/except` that immediately converts to `err(...)`.
+5. Propagate errors up unchanged: `result = await SomeRepository.find_by_id(id); if result.is_err(): return err(result.error)`.
+
+```python
+# In a router:
+result = await get_test_controller(test_id)
+if result.is_err():
+    raise app_error_to_http_exception(result.error)
+return success_response(result.value)
+```
+
+---
+
+## 4. Error System
+
+**File:** `app/utils/errors.py`
+
+```python
+class AppError(Exception):
+    def __init__(self, message: str, code: int, status_code: int):
+        self.message = message
+        self.code = code
+        self.status_code = status_code
+        super().__init__(message)
+
+ERRORS = {
+    # Common (1xxxx)
+    "DATABASE_ERROR": AppError("Database operation failed", 10001, 500),
+    "VALIDATION_ERROR": AppError("Validation failed", 10002, 422),
+    "RESOURCE_NOT_FOUND": AppError("Resource not found", 10003, 404),
+
+    # Auth (2xxxx)
+    "NO_TOKEN_PROVIDED": AppError("No authentication token provided", 20001, 401),
+    "INVALID_AUTH_TOKEN": AppError("Invalid authentication token", 20002, 401),
+    "TOKEN_EXPIRED": AppError("Authentication token has expired", 20003, 401),
+
+    # Domain-specific ranges (3xxxx–9xxxx) — see backend-architecture.md §5
+    # for the full catalog (Classes/Roster, Books/Ingestion, Tests/Questions,
+    # Submissions/Grading, Reports, Storage, External Services).
+}
+```
+
+**Rules** — identical spirit to the Node guide:
+- Every error is pre-defined in `ERRORS`, referenced by key — never construct `AppError(...)` inline in a router/repository/service.
+- `backend-architecture.md` §5 is the single source of truth for the full catalog; this file just holds the mechanism.
+
+---
+
+## 5. Response Helpers
+
+**File:** `app/utils/responses.py` — always use these, never hand-build a response dict.
+
+```python
+def success_response(data, message: str = "Success") -> dict:
+    return {"success": True, "message": message, "data": data}
+
+def error_response(error: AppError) -> dict:
+    return {"success": False, "message": error.message, "code": error.code}
+```
+
+Registered globally as a FastAPI exception handler for `AppError`, so a router that raises `app_error_to_http_exception(result.error)` always produces the same shape without repeating boilerplate per-route.
+
+---
+
+## 6. Cursor Pagination
+
+**File:** `app/types/pagination.py`
+
+```python
+from pydantic import BaseModel
+from typing import Generic, TypeVar, List
+
+T = TypeVar("T")
+
+class PageInfo(BaseModel):
+    has_next: bool
+    next_cursor: int
+
+class Paginated(BaseModel, Generic[T]):
+    data: List[T]
+    pagination: PageInfo
+```
+
+Same "fetch `limit + 1` rows to detect `has_next`" convention as the Node guide — every repository's `list_paginated()` method follows this, no exceptions.
+
+---
+
+## 7. Models
+
+**File:** `app/models/[entity].py` — Pydantic models, one file per entity, mirroring `database-design.md`'s tables:
+
+```python
+from pydantic import BaseModel
+from datetime import datetime
+from typing import Optional
+
+class Teacher(BaseModel):
+    id: int
+    name: str
+    email: str
+    password_hash: str
+    created_at: datetime
+
+class TeacherView(BaseModel):
+    """What actually goes over the wire — never leak password_hash."""
+    id: int
+    name: str
+    email: str
+
+class CreateTeacherData(BaseModel):
+    name: str
+    email: str
+    password: str  # plaintext in, hashed before it ever reaches a repository
+```
+
+Same split as the Node models: a full internal model, a `*View` for API responses (strips sensitive fields), and a `Create*Data`/`Update*Data` input model per write operation.
+
+---
+
+## 8. Repositories
+
+**File:** `app/repositories/[entity]_repository.py` — the only place that touches the database, zero business logic, same shape as the Node guide's interface + class + singleton:
+
+```python
+from typing import Protocol, List
+from app.models.teacher import Teacher, TeacherView
+from app.utils.result import Result, ok, err
+from app.utils.errors import ERRORS
+from app.utils.logger import get_logger
+from app.database.pool import get_pool
+
+logger = get_logger("teacher_repository")
+
+# 1. Define the interface
+class ITeacherRepository(Protocol):
+    async def find_by_email(self, email: str) -> Result[List[Teacher], "AppError"]: ...
+    async def find_by_id(self, teacher_id: int) -> Result[Teacher, "AppError"]: ...
+    async def create(self, name: str, email: str, password_hash: str) -> Result[Teacher, "AppError"]: ...
+
+# 2. Implement the class
+class TeacherRepositoryImpl:
+    async def find_by_email(self, email: str) -> Result[List[Teacher], "AppError"]:
+        try:
+            pool = get_pool()
+            rows = await pool.fetch_all(
+                "SELECT id, name, email, password_hash, created_at FROM teachers WHERE email = %s",
+                (email,),
+            )
+            return ok([Teacher(**row) for row in rows])
+        except Exception:
+            logger.exception("Error finding teacher by email")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    async def find_by_id(self, teacher_id: int) -> Result[Teacher, "AppError"]:
+        try:
+            pool = get_pool()
+            row = await pool.fetch_one("SELECT * FROM teachers WHERE id = %s", (teacher_id,))
+            if row is None:
+                return err(ERRORS["TEACHER_NOT_FOUND"])
+            return ok(Teacher(**row))
+        except Exception:
+            logger.exception("Error fetching teacher by id")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    async def create(self, name: str, email: str, password_hash: str) -> Result[Teacher, "AppError"]:
+        try:
+            pool = get_pool()
+            new_id = await pool.execute(
+                "INSERT INTO teachers (name, email, password_hash) VALUES (%s, %s, %s)",
+                (name, email, password_hash),
+            )
+            return await self.find_by_id(new_id)
+        except Exception:
+            logger.exception("Error creating teacher")
+            return err(ERRORS["DATABASE_ERROR"])
+
+# 3. Export singleton — always a module-level instance, never instantiated ad hoc
+TeacherRepository = TeacherRepositoryImpl()
+```
+
+### Repository rules
+- Every method is `async` and returns `Result[T, AppError]`.
+- Every method wraps its body in `try/except` — the `except` always logs and returns `err(ERRORS["DATABASE_ERROR"])`.
+- No business logic — just SQL + mapping to a Pydantic model. No password hashing, no JWT, no AI calls.
+- `INSERT` re-queries via `find_by_id(new_id)` rather than trusting a driver-returned row — same as the Node guide.
+- `find_by_id`-style single lookups return `err(ERRORS["X_NOT_FOUND"])` when missing — **never `None`**.
+- `find_by_email`-style multi lookups return `ok([])` when nothing matches — empty list is a valid success.
+- Always parameterized queries (`%s` placeholders) — never string-format SQL.
+
+---
+
+## 9. Service Layer & Provider Abstraction
+
+**This is the section that matters most for swappability.** Every external AI/CV/OCR/embedding/storage provider sits behind an interface — routers and other application code only ever depend on the interface, never on a concrete provider class. Swapping Claude for GPT, or Voyage for OpenAI embeddings, or the in-house `cv-ocr-service` for a hosted vendor, is then a **one-file, zero-caller-change** operation.
+
+**File:** `app/services/llm_service.py`
+
+```python
+from typing import Protocol, List
+from app.utils.result import Result
+from app.models.report import ReportEvidence
+from app.config.settings import settings
+
+# 1. The interface — everything else in the app depends on THIS, never on a concrete class
+class ILlmService(Protocol):
+    async def classify_chapter(self, chapter_text: str) -> Result[ChapterClassification, "AppError"]: ...
+    async def map_question_to_node(self, question_text: str, candidates: List[NodeCandidate]) -> Result[NodeSelection, "AppError"]: ...
+    async def grade_subjective(self, extracted_text: str, model_answer: str | None, keyword_key: list | None) -> Result[SubjectiveGrade, "AppError"]: ...
+    async def phrase_report(self, evidence: ReportEvidence) -> Result[str, "AppError"]: ...
+
+# 2a. One concrete implementation
+class AnthropicLlmService:
+    """Calls Claude via the Anthropic SDK. Implements ILlmService."""
+    async def classify_chapter(self, chapter_text: str) -> Result[ChapterClassification, "AppError"]:
+        ...  # Anthropic-specific call, mapped to the shared return shape
+
+    # ... the other three methods, same pattern
+
+# 2b. An alternate implementation — same interface, swap-in replacement
+class OpenAiLlmService:
+    """Calls GPT via the OpenAI SDK. Implements ILlmService — identical method signatures."""
+    ...
+
+# 3. Resolved once, from config — nothing else in the app imports a provider class directly
+def get_llm_service() -> ILlmService:
+    if settings.LLM_PROVIDER == "anthropic":
+        return AnthropicLlmService()
+    if settings.LLM_PROVIDER == "openai":
+        return OpenAiLlmService()
+    raise ValueError(f"Unknown LLM_PROVIDER: {settings.LLM_PROVIDER}")
+```
+
+**Used via FastAPI dependency injection**, never imported directly:
+
+```python
+# app/routers/test_router.py
+from fastapi import Depends
+from app.services.llm_service import ILlmService, get_llm_service
+
+@router.post("/{test_id}/questions/{q_id}/map")
+async def map_question(test_id: int, q_id: int, llm: ILlmService = Depends(get_llm_service)):
+    result = await llm.map_question_to_node(question_text, candidates)
+    ...
+```
+
+The router's code never changes if `LLM_PROVIDER` flips from `"anthropic"` to `"openai"` in config — only `get_llm_service()`'s branch and a new class need to exist. The same pattern applies to every other provider-backed service:
+
+| Service | Interface | Swappable providers |
+|---|---|---|
+| `llm_service.py` | `ILlmService` | Anthropic (Claude), OpenAI (GPT), etc. |
+| `embedding_service.py` | `IEmbeddingService` | Voyage AI, OpenAI embeddings, etc. |
+| `cv_ocr_service.py` | `ICvOcrService` | In-house OpenCV/OCR module, or a future hosted vendor — same `detect_bubbles()`/`extract_handwriting()` signatures either way |
+| `pdf_text_service.py` | `IPdfTextService` | Any PDF-parsing library — swappable without touching the ingestion pipeline's calling code |
+| `storage_service.py` | `IStorageService` | S3, GCS, any S3-compatible provider |
+
+### Service rules
+- Every service method returns `Result[T, AppError]` — same discipline as repositories; a provider's SDK exception is caught and converted, never left to propagate.
+- **No repository ever imports a service, and no service ever imports a repository** — services are pure "call an external thing, map the result," repositories are pure "call the database." A router (or a thin per-flow orchestration function, if a pipeline step needs to call both) is what wires them together, per the pipeline diagrams in `backend-architecture.md` §6.
+- Tests mock the **interface**, exactly like repositories — a test for `test_router.py`'s question-mapping endpoint never talks to a real LLM provider.
+
+---
+
+## 10. Routers
+
+**File:** `app/routers/[entity]_router.py` — FastAPI's equivalent of the Node guide's controller + route combined (FastAPI doesn't need a separate routing file; the decorator *is* the route registration).
+
+```python
+from fastapi import APIRouter, Depends
+from app.middleware.auth import get_current_teacher
+from app.repositories.class_repository import ClassRepository
+from app.utils.responses import success_response
+from app.utils.errors import app_error_to_http_exception
+
+router = APIRouter(prefix="/api/classes", tags=["classes"])
+
+@router.get("/{class_id}")
+async def get_class(class_id: int, teacher: TokenData = Depends(get_current_teacher)):
+    result = await ClassRepository.find_by_id(class_id)
+    if result.is_err():
+        raise app_error_to_http_exception(result.error)
+    class_ = result.value
+    if class_.teacher_id != teacher.id:
+        raise app_error_to_http_exception(ERRORS["CLASS_NOT_FOUND"])  # don't reveal another teacher's class exists
+    return success_response(class_)
+```
+
+### Router rules
+- Auth/role checks are FastAPI **dependencies** (`Depends(get_current_teacher)`, `Depends(require_own_class)`), not manual `if` checks scattered per-route — same intent as the Node guide's middleware chain (`authenticate → requireX → validateRequest → handler`), expressed as FastAPI's own dependency system.
+- A router unwraps `Result`s from repositories/services and converts `Err` to an HTTP exception via one shared helper (`app_error_to_http_exception`) — never hand-rolls a `raise HTTPException(...)` with an inline status code.
+- Request/response bodies are Pydantic models — FastAPI validates them automatically; no separate manual validation step is needed (this replaces the Node guide's Zod `validate-request` middleware).
+
+---
+
+## 11. Testing
+
+| Layer | Type | Mocks | Notes |
+|---|---|---|---|
+| Routers | Unit (`pytest`, `TestClient`) | repos + services mocked via dependency overrides (`app.dependency_overrides[...]`) | Mirrors the Node guide's "controllers: unit, repos mocked" |
+| Repositories | Integration (`pytest` + `testcontainers` MySQL) | none — real SQL against a throwaway container | Cursor pagination, `NOT_FOUND` vs. empty-list behavior, `UNIQUE (test_id, student_id)` on submissions, tree rollup query |
+| Services | Unit | provider SDKs mocked | Verify the `Result` mapping (success shape + each failure mode converts to the right `AppError`), never call a real provider in CI |
+
+---
+
+## 12. Quick Reference Checklist
+
+Before opening a PR for a new module:
+- [ ] Model(s) added — full model + `*View` + `Create*Data`/`Update*Data` as needed
+- [ ] Repository — interface (`Protocol`) + impl class + singleton export, every method `Result`-wrapped, `try/except` → `DATABASE_ERROR`
+- [ ] New errors added to `ERRORS` in `utils/errors.py` (and to the catalog in `backend-architecture.md` §5) — never inline `AppError(...)`
+- [ ] Router — auth via `Depends`, unwraps `Result` via `app_error_to_http_exception`, no manual status codes
+- [ ] If the module calls an external provider (AI/embedding/CV/storage) — goes through the service's **interface**, never a concrete provider class imported directly
+- [ ] Repository integration tests (testcontainers) + router unit tests (mocked deps) both added
