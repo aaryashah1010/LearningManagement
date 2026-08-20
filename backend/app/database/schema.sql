@@ -24,12 +24,9 @@ CREATE TABLE students (
 
 CREATE TABLE classes (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    teacher_id BIGINT UNSIGNED NOT NULL COMMENT 'tenancy boundary — every roster/test/result query scopes through this',
     name VARCHAR(150) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE RESTRICT,
-    INDEX idx_classes_teacher (teacher_id)
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 -- No roll_number in v1 — identification is login-only (see § Design

@@ -3,9 +3,10 @@ from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from typing import Any
 
+import mysql.connector
 from mysql.connector import Error as MySQLError
 from mysql.connector import pooling
-from mysql.connector.pooling import PooledMySQLConnection
+from mysql.connector.abstracts import MySQLConnectionAbstract
 
 from app.config.settings import settings
 from app.utils.logger import get_logger
@@ -14,19 +15,24 @@ logger = get_logger("database")
 
 _pool: pooling.MySQLConnectionPool | None = None
 
+_DB_KWARGS = {
+    "host": settings.DB_HOST,
+    "port": settings.DB_PORT,
+    "user": settings.DB_USER,
+    "password": settings.DB_PASSWORD,
+    "database": settings.DB_NAME,
+}
+
 
 def get_pool() -> pooling.MySQLConnectionPool:
-    # autocommit=True here would override every connection's autocommit, breaking transaction()'s rollback.
+    # Setting conn.autocommit after get_connection() doesn't reliably reach the server on pooled connections.
     global _pool
     if _pool is None:
         _pool = pooling.MySQLConnectionPool(
             pool_name="lm_pool",
             pool_size=10,
-            host=settings.DB_HOST,
-            port=settings.DB_PORT,
-            user=settings.DB_USER,
-            password=settings.DB_PASSWORD,
-            database=settings.DB_NAME,
+            autocommit=True,
+            **_DB_KWARGS,
         )
     return _pool
 
@@ -47,7 +53,6 @@ async def connect_to_database(retries: int = 10, delay_seconds: float = 2.0) -> 
 
 def fetch_all(query: str, params: Sequence[Any] = ()) -> list[dict]:
     conn = get_pool().get_connection()
-    conn.autocommit = True
     try:
         with conn.cursor(dictionary=True) as cursor:
             cursor.execute(query, params)
@@ -58,7 +63,6 @@ def fetch_all(query: str, params: Sequence[Any] = ()) -> list[dict]:
 
 def fetch_one(query: str, params: Sequence[Any] = ()) -> dict | None:
     conn = get_pool().get_connection()
-    conn.autocommit = True
     try:
         with conn.cursor(dictionary=True) as cursor:
             cursor.execute(query, params)
@@ -69,7 +73,6 @@ def fetch_one(query: str, params: Sequence[Any] = ()) -> dict | None:
 
 def execute(query: str, params: Sequence[Any] = ()) -> int:
     conn = get_pool().get_connection()
-    conn.autocommit = True
     try:
         with conn.cursor() as cursor:
             cursor.execute(query, params)
@@ -79,9 +82,9 @@ def execute(query: str, params: Sequence[Any] = ()) -> int:
 
 
 @contextmanager
-def transaction() -> Generator[PooledMySQLConnection, None, None]:
-    conn = get_pool().get_connection()
-    conn.autocommit = False
+def transaction() -> Generator[MySQLConnectionAbstract, None, None]:
+    # Non-pooled on purpose — pooled connections are fixed at autocommit=True (see get_pool()).
+    conn = mysql.connector.connect(autocommit=False, **_DB_KWARGS)
     try:
         yield conn
         conn.commit()
@@ -89,5 +92,4 @@ def transaction() -> Generator[PooledMySQLConnection, None, None]:
         conn.rollback()
         raise
     finally:
-        conn.autocommit = True
         conn.close()

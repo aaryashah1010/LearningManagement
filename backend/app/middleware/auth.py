@@ -16,6 +16,10 @@ def _get_token_data(authorization: str = Header(None)) -> TokenData:
     return result.value
 
 
+def get_current_user(token_data: TokenData = Depends(_get_token_data)) -> TokenData:
+    return token_data
+
+
 def get_current_teacher(token_data: TokenData = Depends(_get_token_data)) -> TokenData:
     if token_data.role != "teacher":
         raise app_error_to_http_exception(ERRORS["FORBIDDEN"])
