@@ -68,12 +68,16 @@ CREATE TABLE subjects (
     name VARCHAR(100) NOT NULL UNIQUE
 ) ENGINE=InnoDB;
 
+-- edition_year disambiguates multiple books for the same subject/grade over
+-- time (NCERT syllabus revisions) — new syllabus = a new row, old one stays
+-- untouched so tests/reports built against it stay valid. See § Design Decisions.
 CREATE TABLE ncert_books (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     subject_id BIGINT UNSIGNED NOT NULL,
     title VARCHAR(150) NOT NULL,
     grade VARCHAR(20) NULL,
-    pdf_url VARCHAR(500) NOT NULL,
+    edition_year YEAR NULL,
+    pdf_url VARCHAR(500) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE RESTRICT,
     INDEX idx_ncert_books_subject (subject_id)
@@ -99,18 +103,23 @@ CREATE TABLE curriculum_nodes (
     INDEX idx_curriculum_nodes_parent (parent_id)
 ) ENGINE=InnoDB;
 
+-- book_id, not subject_id — pins a test to one specific book (grade/edition),
+-- since a subject can have several (Class 9 vs Class 10, or old vs revised
+-- syllabus). subject is derived via book_id -> ncert_books.subject_id, not
+-- stored redundantly. See § Design Decisions.
 CREATE TABLE tests (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     class_id BIGINT UNSIGNED NOT NULL,
-    subject_id BIGINT UNSIGNED NOT NULL,
+    book_id BIGINT UNSIGNED NOT NULL,
     title VARCHAR(150) NOT NULL,
     setup_path ENUM('in_app','uploaded_pdf') NOT NULL,
     source_pdf_url VARCHAR(500) NULL,
     published_at DATETIME NULL COMMENT 'once set, question_node_map rows for this test are locked — never re-classified',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
-    FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE RESTRICT,
-    INDEX idx_tests_class (class_id)
+    FOREIGN KEY (book_id) REFERENCES ncert_books(id) ON DELETE RESTRICT,
+    INDEX idx_tests_class (class_id),
+    INDEX idx_tests_book (book_id)
 ) ENGINE=InnoDB;
 
 -- No test_layout_templates table in v1 — see § Design Decisions above and

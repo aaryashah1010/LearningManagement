@@ -49,9 +49,7 @@ ERRORS: dict[str, AppError] = {
     "TEST_NOT_FOUND": AppError("Test not found", 50001, 404),
     "TEST_ALREADY_PUBLISHED": AppError("Test is already published", 50002, 409),
     "QUESTION_PAPER_PARSE_FAILED": AppError("Could not parse the question paper PDF", 50003, 502),
-    "NODE_NOT_IN_SUBJECT_SCOPE": AppError(
-        "Curriculum node does not belong to this test's subject", 50004, 422
-    ),
+    "NODE_NOT_IN_BOOK_SCOPE": AppError("Curriculum node does not belong to this test's book", 50004, 422),
     "QUESTION_NOT_FOUND": AppError("Question not found", 50005, 404),
     # ─── Submissions / Grading (6xxxx) ──────────────────────────────────
     "SUBMISSION_NOT_FOUND": AppError("Submission not found", 60001, 404),

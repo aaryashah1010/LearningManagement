@@ -136,11 +136,11 @@ fields at all in this schema; subjective test setup is its own future PR
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| POST | `/api/classes/{class_id}/tests` | teacher | Create a test: `subject_id`, `title`, `setup_path: in_app\|uploaded_pdf` |
-| POST | `/api/tests/{id}/questions/upload` | teacher | Path B only — multipart question-paper PDF. Extracts the MCQ answer key via `llm_service`, writes `questions` rows |
-| GET | `/api/tests/{id}/questions` | teacher | List with proposed node mapping (§4b) for review |
-| PUT | `/api/tests/{id}/questions/{q_id}/node` | teacher | Admin corrects the AI-picked node — body `{node_id}` |
-| POST | `/api/tests/{id}/publish` | teacher | Sets `published_at` — locks `question_node_map` for this test permanently |
+| POST | `/api/classes/{class_id}/tests` | teacher (assigned), admin | Create a test: `book_id` (not `subject_id` — pins one specific grade/edition, see `database-design.md` § Design Decisions), `title`, `setup_path: in_app\|uploaded_pdf` |
+| POST | `/api/tests/{id}/questions/upload` | teacher (assigned), admin | Path B only — multipart question-paper PDF. Extracts the MCQ answer key via `llm_service`, writes `questions` rows |
+| GET | `/api/tests/{id}/questions` | teacher (assigned), admin | List with proposed node mapping (§4b) for review |
+| PUT | `/api/tests/{id}/questions/{q_id}/node` | teacher (assigned), admin | Corrects the AI-picked node — body `{node_id}` |
+| POST | `/api/tests/{id}/publish` | teacher (assigned), admin | Sets `published_at` — locks `question_node_map` for this test permanently |
 
 ### 2.5 Submissions — `/api/tests/{test_id}/submissions`, `/api/submissions`
 
@@ -218,8 +218,8 @@ Developer reads the book's TOC page(s) (Chapter/Topic) and relevant chapter text
   seed/script — no POST endpoint, no confirm flow, no teacher-facing UI
         │
         ▼
-  taxonomy ready for this book — usable by any test in this subject from now on;
-  the app only ever reads it (GET /api/subjects, GET /api/books/{id}/curriculum)
+  taxonomy ready for this book — usable by any test set up against this book from
+  now on; the app only ever reads it (GET /api/subjects, GET /api/books/{id}/curriculum)
 ```
 
 No staging tables, no PDF-parsing service, no per-chapter AI call at request time, no embeddings.
@@ -230,8 +230,8 @@ No staging tables, no PDF-parsing service, no per-chapter AI call at request tim
 questions extracted (Path A: already in question bank; Path B: parsed from uploaded PDF)
         │
         ▼
-  SELECT id, name, parent_id, level FROM curriculum_nodes WHERE book/subject scope
-        │  one subject's whole taxonomy — a few hundred short name+path entries,
+  SELECT id, name, parent_id, level FROM curriculum_nodes WHERE book_id = tests.book_id
+        │  one book's whole taxonomy — a few hundred short name+path entries,
         │  small enough to send directly, no shortlist step needed
         ▼
   llm_service.map_question_to_node(question_text, full_taxonomy_for_subject)
@@ -329,7 +329,7 @@ repository, or pipeline orchestration code.
 | 2xxxx | Auth | `NO_TOKEN_PROVIDED` 20001·401, `INVALID_AUTH_TOKEN` 20002·401, `TOKEN_EXPIRED` 20003·401, `INVALID_CREDENTIALS` 20004·401, `FORBIDDEN` 20005·403, `INVALID_REFRESH_TOKEN` 20006·401, `INCORRECT_CURRENT_PASSWORD` 20007·401 (`PATCH /api/auth/password`) |
 | 3xxxx | Classes / Roster | `CLASS_NOT_FOUND` 30001·404 (also returned to a teacher not assigned to the class — don't reveal existence), `STUDENT_NOT_IN_CLASS` 30002·404, `ROLL_NUMBER_TAKEN` 30003·409, `EMAIL_OR_PHONE_TAKEN` 30004·409 (per-role uniqueness, checked by both `POST /api/accounts/teachers` and `POST /api/accounts/students/bulk`), `TEACHER_NOT_FOUND` 30005·404 (`POST /api/classes/{id}/teachers`) |
 | 4xxxx | Subjects / Books / Curriculum Taxonomy | `BOOK_NOT_FOUND` 40001·404, `SUBJECT_NOT_FOUND` 40005·404, `CURRICULUM_NODE_NOT_FOUND` 40006·404 — all read-only lookups, since this data is developer-seeded, not written through the API (`../curriculum-taxonomy.md` § Building the Taxonomy) |
-| 5xxxx | Tests / Questions | `TEST_NOT_FOUND` 50001·404, `TEST_ALREADY_PUBLISHED` 50002·409, `QUESTION_PAPER_PARSE_FAILED` 50003·502, `NODE_NOT_IN_SUBJECT_SCOPE` 50004·422, `QUESTION_NOT_FOUND` 50005·404 |
+| 5xxxx | Tests / Questions | `TEST_NOT_FOUND` 50001·404, `TEST_ALREADY_PUBLISHED` 50002·409, `QUESTION_PAPER_PARSE_FAILED` 50003·502, `NODE_NOT_IN_BOOK_SCOPE` 50004·422 (a curriculum node from a different book than the test's `book_id`), `QUESTION_NOT_FOUND` 50005·404 |
 | 6xxxx | Submissions / Grading | `SUBMISSION_NOT_FOUND` 60001·404, `DUPLICATE_SUBMISSION` 60002·409 (`UNIQUE (test_id, student_id)`), `ANSWER_NOT_FOUND` 60003·404 — `QR_STUDENT_MISMATCH`/`ROLL_NUMBER_MISMATCH`/`MATCH_ALREADY_RESOLVED` deferred to Phase 2 with the identification features they belong to |
 | 7xxxx | Reports | `NO_RESULTS_YET` 70001·404 |
 | 8xxxx | Files / Storage | `FILE_TOO_LARGE` 80001·413, `INVALID_FILE_TYPE` 80002·422, `STORAGE_UPLOAD_FAILED` 80003·502 |

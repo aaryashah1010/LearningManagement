@@ -15,7 +15,7 @@ erDiagram
     CLASSES ||--o{ CLASS_TEACHERS : "assigned"
     TEACHERS ||--o{ CLASS_TEACHERS : "assigned to"
     CLASSES ||--o{ TESTS : "has"
-    SUBJECTS ||--o{ TESTS : "is subject of"
+    NCERT_BOOKS ||--o{ TESTS : "is set from"
     SUBJECTS ||--o{ NCERT_BOOKS : "has textbook"
     NCERT_BOOKS ||--o{ CURRICULUM_NODES : "entered from"
     CURRICULUM_NODES ||--o{ CURRICULUM_NODES : "parent of"
@@ -71,7 +71,8 @@ erDiagram
         bigint subject_id FK
         varchar title
         varchar grade
-        varchar pdf_url
+        year edition_year "nullable — disambiguates multiple books per subject/grade over time"
+        varchar pdf_url "nullable — undecided whether/where a copy is hosted"
     }
 
     CURRICULUM_NODES {
@@ -87,7 +88,7 @@ erDiagram
     TESTS {
         bigint id PK
         bigint class_id FK
-        bigint subject_id FK
+        bigint book_id FK "not subject_id — pins one specific grade/edition; subject derived via book"
         varchar title
         enum setup_path "in_app / uploaded_pdf"
         datetime published_at "nullable — question/node mapping locked once set"
@@ -138,9 +139,9 @@ erDiagram
 | 4 | `class_enrollments` | Roster: which students belong to which class | class 1→N, student 1→N |
 | 5 | `class_teachers` | Which teachers are assigned to which classes — the access boundary a plain teacher is scoped by; many-to-many, admin-managed | class 1→N, teacher 1→N |
 | 6 | `subjects` | Mathematics, Physics, etc. | — |
-| 7 | `ncert_books` | One row per book the curriculum taxonomy is entered from | subject 1→N |
+| 7 | `ncert_books` | One row per book edition the curriculum taxonomy is entered from; `edition_year` disambiguates multiple books per subject/grade over time | subject 1→N |
 | 8 | `curriculum_nodes` | Curriculum taxonomy: Chapter→Topic→Subtopic tree, self-referencing, developer-seeded (see [curriculum-taxonomy.md](../curriculum-taxonomy.md)) | book 1→N, self 1→N (parent) |
-| 9 | `tests` | One test/exam within a class | class 1→N, subject 1→N |
+| 9 | `tests` | One test/exam within a class, pinned to one specific book (not just a subject) | class 1→N, book 1→N |
 | 10 | `questions` | Questions within a test, with answer key / model answer | test 1→N |
 | 11 | `question_node_map` | Question → curriculum node(s), decided once at test setup | question N↔N, curriculum_node N↔N |
 | 12 | `submissions` | One scanned/uploaded sheet per student per test | test 1→N, student 1→N |
@@ -160,6 +161,7 @@ No table stores marks on `curriculum_nodes` — the taxonomy is shared, read-onl
 - **No `curriculum_nodes.confirmed` column, no staging-table review flow.** Earlier design had the app auto-fill Chapter/Topic from PDF parsing (`confirmed = false`) with a teacher review/confirm step. Revised: a developer authors the whole tree offline (AI chat tool as a drafting aid, verified against the actual book, entered via SQL seed/script — see [curriculum-taxonomy.md § Building the Taxonomy](../curriculum-taxonomy.md#building-the-taxonomy)), not through an app endpoint at all. Every row is entered whole and already verified, so there's nothing left to gate with a boolean.
 - **No `IEmbeddingService`/embedding provider anywhere in the architecture.** It existed to shortlist candidate nodes before an AI call at question-mapping time — unnecessary once one subject's whole taxonomy (a few hundred short name+path entries, no lengthy summaries) is small enough to send directly in a single prompt. See [curriculum-taxonomy.md § Mapping Questions onto the Taxonomy](../curriculum-taxonomy.md#mapping-questions-onto-the-taxonomy).
 - **`level` is a fixed 3-value `ENUM` (chapter/topic/subtopic) — locked, checked against real NCERT content.** A Class 10 Maths chapter ("Circles") confirmed a Subtopic is already a single atomic, testable idea — nothing meaningful to split further, and going deeper would only dilute the "Insufficient Data" reporting threshold and multiply manual-entry workload. At this fixed, known depth, walking or rolling up the tree is three plain self-joins, no recursion needed. See [curriculum-taxonomy.md § Open Questions](../curriculum-taxonomy.md#open-questions) for the full reasoning.
+- **`tests.book_id`, not `tests.subject_id` — and `ncert_books.edition_year`.** A subject can have several books (Class 9 vs Class 10, or an older syllabus vs NCERT's rationalized revision) — `subject_id` alone can't say which one a test's questions should be mapped against. `book_id` pins that explicitly; `subject_id` on `tests` was dropped rather than kept alongside it, since it's fully derivable (`book.subject_id`) and two FKs that could in principle disagree is worse than one. When NCERT revises a syllabus, the fix is a new `ncert_books` row (with its own fresh `curriculum_nodes` tree) — never editing an existing one in place, since `question_node_map.node_id` has `ON DELETE RESTRICT` specifically to protect historical tests/reports from having their node references rewritten out from under them. `edition_year` (nullable) disambiguates which book is which when a subject/grade has more than one.
 - **Question → node mapping is locked at test setup, never re-classified.** `tests.published_at` marks that point; `question_node_map` rows don't change after a test goes live, regardless of how many students take it later.
 - **Results never touch the taxonomy.** Every graded result is a row in `answers`, referencing a `question_id` — which node(s) it counts toward is derived by joining through `question_node_map`, not stored redundantly on `answers` or written onto `curriculum_nodes`. Per-student and class-wide reports are both just different `GROUP BY` scopes over the same `answers` rows, computed on demand, not precomputed onto the taxonomy.
 - **Grading is mechanical, not AI, at submission time.** `answers.is_correct` comes from bubble-fill detection + answer-key comparison — the only AI cost in the whole pipeline is the one-time question-mapping call at test setup. See [omr-grading.md](../omr-grading.md).
@@ -176,7 +178,7 @@ No table stores marks on `curriculum_nodes` — the taxonomy is shared, read-onl
 Neither `ncert_books.pdf_url` nor `submissions.image_url` is a "free" reference to something that just exists somewhere — both need a real file behind them, and the database only ever stores a pointer, never the file bytes.
 
 - **Processing (both books and submissions) uses a temp file, settled, independent of the permanent-storage question below.** An uploaded PDF/image is written to OS-managed temp storage (e.g. Python's `tempfile`) as it's received — never fully buffered in application memory — and whatever reads it (the PDF bookmark/TOC parser, the CV/OCR service) works off that temp file. The temp file is auto-cleaned once processing is done, or on a schedule if something crashes mid-way. This part doesn't depend on whether a permanent copy gets kept afterward.
-- **`ncert_books.pdf_url` — whether we keep a permanent copy at all is genuinely undecided, not settled.** NCERT publishes textbooks as free PDFs (no licensing cost), but "free to download" isn't the same as "safe to link to directly." Their site could restructure or move a file at any time, breaking any page pointer built from it. Keeping our own permanent copy avoids that, at a small ongoing storage cost. Not keeping one is also possible if the "go read pages 120–125" link is allowed to depend on NCERT's own site staying stable. **Neither option is decided yet** — and if NCERT re-hosting terms turn out to disallow keeping our own copy, that would force the decision anyway.
+- **`ncert_books.pdf_url` is nullable — whether we ever keep a permanent copy of our own is still genuinely undecided, not settled.** NCERT publishes textbooks as free PDFs (no licensing cost), but "free to download" isn't the same as "safe to link to directly" — their site could restructure or move a page at any time, breaking any page pointer built from it. Keeping our own permanent copy avoids that, at a small ongoing storage cost; relying on NCERT's own page staying stable is the other option. **Neither is decided yet.** For now, `pdf_url` is populated with NCERT's own official page for the book (e.g. `https://ncert.nic.in/textbook.php?jemh1=1-15`) — a real, verified link, not a guess — which is exactly the "rely on NCERT's site" option in practice, but doesn't foreclose switching to a self-hosted copy later if that page ever proves unstable. `page_start`/`page_end` don't depend on this being resolved either way.
 - **`submissions.image_url` — mandatory object storage, no external source exists.** A student's scanned answer sheet is user-generated content with no free public copy anywhere — it has to be stored somewhere we control from the moment it's uploaded, for as long as it needs to remain available (e.g., for a teacher's manual review or a later dispute).
 - **Cost, if we do keep permanent copies, is small** — a handful of NCERT textbook PDFs (tens of MB, one-time per book) plus individually small scanned images (a few hundred KB–few MB each, growing with usage) is standard, cheap object-storage usage on any major provider.
 
@@ -251,12 +253,16 @@ CREATE TABLE subjects (
     name VARCHAR(100) NOT NULL UNIQUE
 ) ENGINE=InnoDB;
 
+-- edition_year disambiguates multiple books for the same subject/grade over
+-- time (NCERT syllabus revisions) — new syllabus = a new row, old one stays
+-- untouched so tests/reports built against it stay valid. See § Design Decisions.
 CREATE TABLE ncert_books (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     subject_id BIGINT UNSIGNED NOT NULL,
     title VARCHAR(150) NOT NULL,
     grade VARCHAR(20) NULL,
-    pdf_url VARCHAR(500) NOT NULL,
+    edition_year YEAR NULL,
+    pdf_url VARCHAR(500) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE RESTRICT,
     INDEX idx_ncert_books_subject (subject_id)
@@ -282,18 +288,23 @@ CREATE TABLE curriculum_nodes (
     INDEX idx_curriculum_nodes_parent (parent_id)
 ) ENGINE=InnoDB;
 
+-- book_id, not subject_id — pins a test to one specific book (grade/edition),
+-- since a subject can have several (Class 9 vs Class 10, or old vs revised
+-- syllabus). subject is derived via book_id -> ncert_books.subject_id, not
+-- stored redundantly. See § Design Decisions.
 CREATE TABLE tests (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     class_id BIGINT UNSIGNED NOT NULL,
-    subject_id BIGINT UNSIGNED NOT NULL,
+    book_id BIGINT UNSIGNED NOT NULL,
     title VARCHAR(150) NOT NULL,
     setup_path ENUM('in_app','uploaded_pdf') NOT NULL,
     source_pdf_url VARCHAR(500) NULL,
     published_at DATETIME NULL COMMENT 'once set, question_node_map rows for this test are locked — never re-classified',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
-    FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE RESTRICT,
-    INDEX idx_tests_class (class_id)
+    FOREIGN KEY (book_id) REFERENCES ncert_books(id) ON DELETE RESTRICT,
+    INDEX idx_tests_class (class_id),
+    INDEX idx_tests_book (book_id)
 ) ENGINE=InnoDB;
 
 -- No test_layout_templates table in v1 — see § Design Decisions above and
