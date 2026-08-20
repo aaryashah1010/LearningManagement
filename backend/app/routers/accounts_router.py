@@ -1,16 +1,13 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from app.config.settings import settings
-from app.middleware.auth import get_current_teacher
+from app.middleware.auth import get_current_admin
 from app.models.student import BulkStudentsRequest, to_student_view
 from app.models.teacher import CreateTeacherData, to_teacher_view
 from app.repositories.class_repository import ClassRepository
-from app.repositories.student_repository import StudentRepository
 from app.repositories.teacher_repository import TeacherRepository
 from app.types.token import TokenData
-from app.utils.errors import ERRORS
-from app.utils.password import hash_password
+from app.utils.password import hash_password, password_from_dob
 from app.utils.responses import error_response, success_response
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
@@ -22,7 +19,7 @@ def _err(error) -> JSONResponse:
 
 @router.post("/teachers")
 async def create_teacher(
-    body: CreateTeacherData, current_teacher: TokenData = Depends(get_current_teacher)
+    body: CreateTeacherData, current_admin: TokenData = Depends(get_current_admin)
 ) -> JSONResponse:
     result = TeacherRepository.create(body.name, body.email, hash_password(body.password))
     if result.is_err():
@@ -35,33 +32,28 @@ async def create_teacher(
 
 @router.post("/students/bulk")
 async def create_students_bulk(
-    body: BulkStudentsRequest, current_teacher: TokenData = Depends(get_current_teacher)
+    body: BulkStudentsRequest, current_admin: TokenData = Depends(get_current_admin)
 ) -> JSONResponse:
     class_result = ClassRepository.find_by_id(body.class_id)
     if class_result.is_err():
         return _err(class_result.error)
 
     created = []
+    failed = []
     for entry in body.students:
-        match_result = StudentRepository.find_by_email_or_phone(entry.email, entry.phone)
-        if match_result.is_ok():
-            student = match_result.value
-        elif match_result.error.code == ERRORS["RESOURCE_NOT_FOUND"].code:
-            create_result = StudentRepository.create(
-                entry.name, entry.email, entry.phone, hash_password(settings.DEFAULT_STUDENT_PASSWORD)
-            )
-            if create_result.is_err():
-                return _err(create_result.error)
-            student = create_result.value
+        password_hash = hash_password(password_from_dob(entry.date_of_birth))
+        result = ClassRepository.enroll_new_or_matched_student(
+            body.class_id, entry.name, entry.email, entry.phone, entry.date_of_birth, password_hash
+        )
+        if result.is_err():
+            failed.append({"name": entry.name, "code": result.error.code, "message": result.error.message})
         else:
-            return _err(match_result.error)
-
-        enroll_result = ClassRepository.enroll(body.class_id, student.id)
-        if enroll_result.is_err():
-            return _err(enroll_result.error)
-        created.append(to_student_view(student))
+            created.append(to_student_view(result.value))
 
     return JSONResponse(
         status_code=201,
-        content=success_response([s.model_dump() for s in created], "Students enrolled successfully"),
+        content=success_response(
+            {"created": [s.model_dump() for s in created], "failed": failed},
+            "Students enrolled successfully" if not failed else "Some students could not be enrolled",
+        ),
     )

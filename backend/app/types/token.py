@@ -5,5 +5,5 @@ from pydantic import BaseModel
 
 class TokenData(BaseModel):
     id: int
-    role: Literal["teacher", "student"]
+    role: Literal["admin", "teacher", "student"]
     email: str

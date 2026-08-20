@@ -12,6 +12,8 @@ ER diagram and relational schema for the Learning Management platform: OMR test 
 erDiagram
     CLASSES ||--o{ CLASS_ENROLLMENTS : "has roster"
     STUDENTS ||--o{ CLASS_ENROLLMENTS : "enrolled in"
+    CLASSES ||--o{ CLASS_TEACHERS : "assigned"
+    TEACHERS ||--o{ CLASS_TEACHERS : "assigned to"
     CLASSES ||--o{ TESTS : "has"
     SUBJECTS ||--o{ TESTS : "is subject of"
     SUBJECTS ||--o{ NCERT_BOOKS : "has textbook"
@@ -30,6 +32,7 @@ erDiagram
         varchar name
         varchar email UK
         varchar password_hash
+        enum role "teacher / admin — admin is a super-teacher, not a separate account type"
     }
 
     STUDENTS {
@@ -37,6 +40,7 @@ erDiagram
         varchar name
         varchar email UK "nullable"
         varchar phone UK "nullable"
+        date date_of_birth "default password source — DDMMYYYY, never stored as plaintext"
         varchar password_hash
     }
 
@@ -49,6 +53,12 @@ erDiagram
         bigint id PK
         bigint class_id FK
         bigint student_id FK
+    }
+
+    CLASS_TEACHERS {
+        bigint id PK
+        bigint class_id FK
+        bigint teacher_id FK
     }
 
     SUBJECTS {
@@ -72,7 +82,6 @@ erDiagram
         varchar name
         int page_start
         int page_end
-        boolean confirmed "auto-filled chapter/topic start false pending review; subtopics true from creation"
     }
 
     TESTS {
@@ -123,18 +132,19 @@ erDiagram
 
 | # | Table | Purpose | Key Relationships |
 |---|-------|---------|-------------------|
-| 1 | `teachers` | Teacher accounts | — |
+| 1 | `teachers` | Teacher accounts; `role` distinguishes admin (super-teacher — creates accounts/classes, assigns teachers to classes) from plain teacher (scoped to assigned classes) | — |
 | 2 | `students` | Student accounts | — |
-| 3 | `classes` | A batch of students; no owning teacher — any teacher can manage any class (see [accounts-and-roster.md](../accounts-and-roster.md)) | — |
+| 3 | `classes` | A batch of students; no owner column — access is scoped via `class_teachers`, not a single FK (see [accounts-and-roster.md](../accounts-and-roster.md)) | — |
 | 4 | `class_enrollments` | Roster: which students belong to which class | class 1→N, student 1→N |
-| 5 | `subjects` | Mathematics, Physics, etc. | — |
-| 6 | `ncert_books` | One row per book the curriculum taxonomy is entered from | subject 1→N |
-| 7 | `curriculum_nodes` | Curriculum taxonomy: Chapter→Topic→Subtopic tree, self-referencing, manually entered (see [curriculum-taxonomy.md](../curriculum-taxonomy.md)) | book 1→N, self 1→N (parent) |
-| 8 | `tests` | One test/exam within a class | class 1→N, subject 1→N |
-| 9 | `questions` | Questions within a test, with answer key / model answer | test 1→N |
-| 10 | `question_node_map` | Question → curriculum node(s), decided once at test setup | question N↔N, curriculum_node N↔N |
-| 11 | `submissions` | One scanned/uploaded sheet per student per test | test 1→N, student 1→N |
-| 12 | `answers` | One graded result per question per submission — the roll-up unit for the taxonomy report | submission 1→N, question 1→N |
+| 5 | `class_teachers` | Which teachers are assigned to which classes — the access boundary a plain teacher is scoped by; many-to-many, admin-managed | class 1→N, teacher 1→N |
+| 6 | `subjects` | Mathematics, Physics, etc. | — |
+| 7 | `ncert_books` | One row per book the curriculum taxonomy is entered from | subject 1→N |
+| 8 | `curriculum_nodes` | Curriculum taxonomy: Chapter→Topic→Subtopic tree, self-referencing, developer-seeded (see [curriculum-taxonomy.md](../curriculum-taxonomy.md)) | book 1→N, self 1→N (parent) |
+| 9 | `tests` | One test/exam within a class | class 1→N, subject 1→N |
+| 10 | `questions` | Questions within a test, with answer key / model answer | test 1→N |
+| 11 | `question_node_map` | Question → curriculum node(s), decided once at test setup | question N↔N, curriculum_node N↔N |
+| 12 | `submissions` | One scanned/uploaded sheet per student per test | test 1→N, student 1→N |
+| 13 | `answers` | One graded result per question per submission — the roll-up unit for the taxonomy report | submission 1→N, question 1→N |
 
 No table stores marks on `curriculum_nodes` — the taxonomy is shared, read-only reference data; every result lives on `answers` and only *references* a node via `questions` → `question_node_map`. See "Results never touch the taxonomy" below.
 
@@ -147,7 +157,7 @@ No table stores marks on `curriculum_nodes` — the taxonomy is shared, read-onl
 - **No `roll_number`, QR code, or sheet-based identification in v1.** MVP identification is login-only — a student uploads their own sheet under their own account, so nothing on the sheet itself needs to identify them, and no standardized template is required (`../omr-grading.md`, current version). These fields were designed and then deliberately removed rather than kept-but-unused, once `../omr-grading.md` §29 confirmed standardized templates/QR/bulk-upload are a named future phase, not MVP scope — add `roll_number` (on `class_enrollments`, unique per class) and a QR-mismatch check back when that phase is actually built. See [accounts-and-roster.md § Future / Phase 2](../accounts-and-roster.md#future--phase-2--teacher-bulk-upload--sheet-based-identification).
 - **Renamed "knowledge graph" → "curriculum taxonomy," table renamed `graph_nodes` → `curriculum_nodes`.** On review, the structure never had multiple relationship types, cross-links, or AI-derived content — it's a plain manually-curated tree, and "graph" overstated that. See [curriculum-taxonomy.md § History](../curriculum-taxonomy.md#history--why-this-simplified-so-much) for the full reasoning.
 - **No `summary`/`summary_embedding` columns, no `book_ingestion_pages`/`book_ingestion_chapters` staging tables, no automated ingestion pipeline.** All dropped, not deferred. The catalog is small and fixed (12 subject-class combinations, 5–10 chapters each), Chapter/Topic names are already printed in the book's own table of contents (no AI judgment needed, no failure mode where AI beats the printed page), and Subtopic — the one level needing real judgment — is a small enough volume (~500–1000 entries total) for direct manual entry by the teacher to be more reliable than an unvalidated AI classification step. See [curriculum-taxonomy.md § History](../curriculum-taxonomy.md#history--why-this-simplified-so-much).
-- **`curriculum_nodes.confirmed`** replaces the old staging-table review flow. Chapter/Topic rows auto-filled by plain PDF bookmark/table-of-contents parsing (not AI — just reading structured data already in the file) start `confirmed = false`; the teacher reviews and confirms or corrects them. Subtopic rows are always manually typed by the teacher and start `confirmed = true` — there's nothing to review since a person entered it directly. This removes the need for separate staging tables entirely: proposed and confirmed data live in the same table, just gated by one boolean.
+- **No `curriculum_nodes.confirmed` column, no staging-table review flow.** Earlier design had the app auto-fill Chapter/Topic from PDF parsing (`confirmed = false`) with a teacher review/confirm step. Revised: a developer authors the whole tree offline (AI chat tool as a drafting aid, verified against the actual book, entered via SQL seed/script — see [curriculum-taxonomy.md § Building the Taxonomy](../curriculum-taxonomy.md#building-the-taxonomy)), not through an app endpoint at all. Every row is entered whole and already verified, so there's nothing left to gate with a boolean.
 - **No `IEmbeddingService`/embedding provider anywhere in the architecture.** It existed to shortlist candidate nodes before an AI call at question-mapping time — unnecessary once one subject's whole taxonomy (a few hundred short name+path entries, no lengthy summaries) is small enough to send directly in a single prompt. See [curriculum-taxonomy.md § Mapping Questions onto the Taxonomy](../curriculum-taxonomy.md#mapping-questions-onto-the-taxonomy).
 - **`level` is a fixed 3-value `ENUM` (chapter/topic/subtopic) — locked, checked against real NCERT content.** A Class 10 Maths chapter ("Circles") confirmed a Subtopic is already a single atomic, testable idea — nothing meaningful to split further, and going deeper would only dilute the "Insufficient Data" reporting threshold and multiply manual-entry workload. At this fixed, known depth, walking or rolling up the tree is three plain self-joins, no recursion needed. See [curriculum-taxonomy.md § Open Questions](../curriculum-taxonomy.md#open-questions) for the full reasoning.
 - **Question → node mapping is locked at test setup, never re-classified.** `tests.published_at` marks that point; `question_node_map` rows don't change after a test goes live, regardless of how many students take it later.
@@ -175,11 +185,17 @@ Neither `ncert_books.pdf_url` nor `submissions.image_url` is a "free" reference 
 ## 5. MySQL DDL (Full Schema)
 
 ```sql
+-- role distinguishes an "admin" (super-teacher: creates teacher/student
+-- accounts, creates classes, assigns teachers to classes) from a plain
+-- "teacher" (scoped to the classes they're assigned to via class_teachers).
+-- One table, not a separate admins table — an admin is a teacher with
+-- elevated permissions, not a different kind of account.
 CREATE TABLE teachers (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     email VARCHAR(150) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
+    role ENUM('teacher','admin') NOT NULL DEFAULT 'teacher',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
@@ -189,6 +205,7 @@ CREATE TABLE students (
     name VARCHAR(100) NOT NULL,
     email VARCHAR(150) NULL UNIQUE,
     phone VARCHAR(20) NULL UNIQUE,
+    date_of_birth DATE NOT NULL COMMENT 'default login password is derived from this (DDMMYYYY) — never stored/returned as plaintext',
     password_hash VARCHAR(255) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -200,6 +217,20 @@ CREATE TABLE classes (
     name VARCHAR(150) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- Many-to-many: a teacher can be assigned to several classes, a class can
+-- have more than one teacher (e.g. different subjects). Admin-managed —
+-- this is the access boundary a plain "teacher" is scoped by; an admin
+-- bypasses it entirely (not assigned to specific classes themselves).
+CREATE TABLE class_teachers (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    class_id BIGINT UNSIGNED NOT NULL,
+    teacher_id BIGINT UNSIGNED NOT NULL,
+    assigned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
+    FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_class_teacher (class_id, teacher_id)
 ) ENGINE=InnoDB;
 
 -- No roll_number in v1 — identification is login-only (see § Design
@@ -231,12 +262,11 @@ CREATE TABLE ncert_books (
     INDEX idx_ncert_books_subject (subject_id)
 ) ENGINE=InnoDB;
 
--- Adjacency-list tree (Chapter -> Topic -> Subtopic), manually entered —
+-- Adjacency-list tree (Chapter -> Topic -> Subtopic), developer-seeded —
 -- see curriculum-taxonomy.md. No summary/embedding columns: matching a
 -- question to a node uses the node's own name + path directly, not an
--- authored description. confirmed distinguishes auto-filled Chapter/Topic
--- rows (from PDF bookmark/TOC parsing, pending teacher review) from
--- Subtopic rows (always manually typed, confirmed from creation).
+-- authored description. Entered via SQL, not an API write path, so every
+-- row is entered whole and verified — no confirmed/pending flag.
 CREATE TABLE curriculum_nodes (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     book_id BIGINT UNSIGNED NOT NULL,
@@ -245,7 +275,6 @@ CREATE TABLE curriculum_nodes (
     name VARCHAR(200) NOT NULL,
     page_start INT NULL,
     page_end INT NULL,
-    confirmed BOOLEAN NOT NULL DEFAULT TRUE,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (book_id) REFERENCES ncert_books(id) ON DELETE CASCADE,
     FOREIGN KEY (parent_id) REFERENCES curriculum_nodes(id) ON DELETE CASCADE,

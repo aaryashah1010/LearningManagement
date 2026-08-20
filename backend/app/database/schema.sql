@@ -2,11 +2,17 @@
 -- Source of truth: docs/backend/database-design.md §5 — copy this file's
 -- content there any time the schema changes, don't edit them independently.
 
+-- role distinguishes an "admin" (super-teacher: creates teacher/student
+-- accounts, creates classes, assigns teachers to classes) from a plain
+-- "teacher" (scoped to the classes they're assigned to via class_teachers).
+-- One table, not a separate admins table — an admin is a teacher with
+-- elevated permissions, not a different kind of account.
 CREATE TABLE teachers (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     email VARCHAR(150) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
+    role ENUM('teacher','admin') NOT NULL DEFAULT 'teacher',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
@@ -16,6 +22,7 @@ CREATE TABLE students (
     name VARCHAR(100) NOT NULL,
     email VARCHAR(150) NULL UNIQUE,
     phone VARCHAR(20) NULL UNIQUE,
+    date_of_birth DATE NOT NULL COMMENT 'default login password is derived from this (DDMMYYYY) — never stored/returned as plaintext',
     password_hash VARCHAR(255) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -27,6 +34,20 @@ CREATE TABLE classes (
     name VARCHAR(150) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- Many-to-many: a teacher can be assigned to several classes, a class can
+-- have more than one teacher (e.g. different subjects). Admin-managed —
+-- this is the access boundary a plain "teacher" is scoped by; an admin
+-- bypasses it entirely (not assigned to specific classes themselves).
+CREATE TABLE class_teachers (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    class_id BIGINT UNSIGNED NOT NULL,
+    teacher_id BIGINT UNSIGNED NOT NULL,
+    assigned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
+    FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_class_teacher (class_id, teacher_id)
 ) ENGINE=InnoDB;
 
 -- No roll_number in v1 — identification is login-only (see § Design
@@ -61,9 +82,8 @@ CREATE TABLE ncert_books (
 -- Adjacency-list tree (Chapter -> Topic -> Subtopic), manually entered —
 -- see curriculum-taxonomy.md. No summary/embedding columns: matching a
 -- question to a node uses the node's own name + path directly, not an
--- authored description. confirmed distinguishes auto-filled Chapter/Topic
--- rows (from PDF bookmark/TOC parsing, pending teacher review) from
--- Subtopic rows (always manually typed, confirmed from creation).
+-- authored description. Developer-seeded (SQL, not an API write path), so
+-- every row is entered whole and verified — no confirmed/pending flag.
 CREATE TABLE curriculum_nodes (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     book_id BIGINT UNSIGNED NOT NULL,
@@ -72,7 +92,6 @@ CREATE TABLE curriculum_nodes (
     name VARCHAR(200) NOT NULL,
     page_start INT NULL,
     page_end INT NULL,
-    confirmed BOOLEAN NOT NULL DEFAULT TRUE,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (book_id) REFERENCES ncert_books(id) ON DELETE CASCADE,
     FOREIGN KEY (parent_id) REFERENCES curriculum_nodes(id) ON DELETE CASCADE,

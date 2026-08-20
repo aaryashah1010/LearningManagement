@@ -19,8 +19,8 @@ it directly (see conversation history / team discussion):
 
 - Nearly every core feature here is CV/AI/ML-shaped — OMR answer extraction (OpenCV
   and/or AI-vision, method left open per `../omr-grading.md`, current version),
-  handwriting OCR (deferred), PDF bookmark/TOC parsing, and LLM calls at a couple of
-  pipeline stages. That's the majority of the product, not one isolable slice of an
+  handwriting OCR (deferred), and LLM calls at a couple of pipeline stages. That's the
+  majority of the product, not one isolable slice of an
   otherwise generic CRUD app — so keeping it in one language avoids constant
   cross-service network hops for what is core, not peripheral, functionality.
 - FastAPI specifically (over Django): this app is async/I/O-heavy on nearly every
@@ -71,30 +71,34 @@ either role** — see § 2.2 for how accounts actually get created (`../accounts
 
 ### 2.2 Accounts & Roster — `/api/accounts`, `/api/classes`
 
-Account creation always requires being authenticated as an existing teacher — no
-self-service registration for either role (`../accounts-and-roster.md`). The very first
-teacher account is seeded directly (DB fixture), not created through this route.
-Teacher and student creation are **separate endpoints**, not one shared route with a
-`role` field — a new teacher is a single ad hoc addition (the creating teacher sets their
-password directly), while students only ever arrive as a class roster (system-issued
-default password, changed via `/api/auth/password` after first login).
+Account creation always requires being authenticated as an **admin** — no self-service
+registration for any role, and plain teachers can't create other accounts either
+(`../accounts-and-roster.md` § Tenancy Model). The very first account is seeded directly
+as `role = 'admin'` (DB fixture), not created through this route. Teacher and student
+creation are **separate endpoints**, not one shared route with a `role` field — a new
+teacher is a single ad hoc addition (the admin sets their password directly), while
+students only ever arrive as a class roster (password derived from `date_of_birth`,
+changed via `/api/auth/password` after first login).
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| POST | `/api/accounts/teachers` | teacher | Body `{name, email, password}` — creates one teacher account with the password the creating teacher chose for them |
-| POST | `/api/accounts/students/bulk` | teacher | Body `{class_id, students: [{name, email?, phone?}]}` — creates (or matches an existing student by email/phone) and enrolls each into `class_id` (any class — no per-teacher ownership check, see § Auth & Tenancy). New accounts get `DEFAULT_STUDENT_PASSWORD` (env-configured, same for every student, changed via `/api/auth/password` after first login) — no per-student password in the request |
+| POST | `/api/accounts/teachers` | admin | Body `{name, email, password}` — creates one plain (`role = 'teacher'`) account with the password the admin chose for them. No way to create another admin through the API |
+| POST | `/api/accounts/students/bulk` | admin | Body `{class_id, students: [{name, date_of_birth, email?, phone?}]}` — creates (or matches an existing student by email/phone) and enrolls each into `class_id`. New accounts get a password derived from `date_of_birth` (`utils/password.py::password_from_dob`, `DDMMYYYY`) — never returned in the response, changed via `/api/auth/password` after first login. A matched-existing account's password/DOB are untouched. Each entry is its own atomic create-or-match + enroll (`ClassRepository.enroll_new_or_matched_student`, one `transaction()` per student) — a bad entry doesn't stop the rest of the batch. Response is `{created: [...], failed: [{name, code, message}]}`, not a flat list — always check `failed` even on a 201 |
 
-Class management stays under `/api/classes`. Any authenticated teacher can act on any
-class — see § Auth & Tenancy for why there's no per-teacher ownership check here.
+Class management stays under `/api/classes`. Creation and teacher-assignment are
+admin-only; a plain teacher's access is scoped to classes they're assigned to via
+`class_teachers` — see § Auth & Tenancy.
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| POST | `/` | teacher | Create a class (no owning teacher recorded — see § Auth & Tenancy) |
-| GET | `/` | teacher | List all classes (paginated) |
-| GET | `/{id}` | teacher | Detail + enrollment count |
-| DELETE | `/{id}/enrollments/{student_id}` | teacher | Remove from roster |
-| PATCH | `/{id}/enrollments/{student_id}` | teacher | Body `{new_class_id}` — move the student from `{id}` to `new_class_id`; atomic, not a remove+re-add from the client's side |
-| GET | `/{id}/enrollments` | teacher | Roster list |
+| POST | `/` | admin | Create a class |
+| GET | `/` | teacher, admin | Admin: all classes. Teacher: only classes they're assigned to (`list_assigned_classes`) |
+| GET | `/{id}` | teacher (assigned), admin | Detail + enrollment count. Unassigned teacher gets `CLASS_NOT_FOUND` |
+| DELETE | `/{id}/enrollments/{student_id}` | teacher (assigned), admin | Remove from roster |
+| PATCH | `/{id}/enrollments/{student_id}` | teacher (assigned), admin | Body `{new_class_id}` — move the student from `{id}` to `new_class_id`; atomic, not a remove+re-add from the client's side. Caller must be assigned to (or admin for) both classes |
+| GET | `/{id}/enrollments` | teacher (assigned), admin | Roster list |
+| POST | `/{id}/teachers` | admin | Body `{teacher_id}` — assign a teacher to this class (idempotent) |
+| DELETE | `/{id}/teachers/{teacher_id}` | admin | Unassign a teacher from this class |
 
 **No `DELETE /{id}` (delete a whole class) — deliberately not built yet.** `tests.class_id`
 already cascades (`ON DELETE CASCADE`), same as `class_enrollments.class_id` — once tests
@@ -105,18 +109,24 @@ a real decision on whether to block deletion when tests/submissions reference th
 
 ### 2.3 Subjects & Curriculum Taxonomy — `/api/subjects`, `/api/books`
 
-Implements the flow in `../curriculum-taxonomy.md` § Building the Taxonomy — a small,
-one-time, largely manual process, **not** an automated ingestion pipeline. No AI reads
-the book; PDF bookmark/TOC parsing is plain structured-data extraction, not judgment.
+**Read-only via the API.** Implements the flow in `../curriculum-taxonomy.md` §
+Building the Taxonomy (revised) — subjects, books, and the full curriculum tree are
+authored once by a developer directly in the database (a SQL seed/script, same pattern
+as the first teacher account in `seed.sql`), not through app endpoints. No upload, no
+PDF parsing, no confirm/review flow, no teacher-facing authoring UI. The app only ever
+reads this reference data, for test setup and question mapping.
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| POST | `/api/subjects` | teacher | Create a subject (e.g. "Physics") — shared, not class-scoped |
-| GET | `/api/subjects` | any authed | List |
-| POST | `/api/subjects/{id}/books` | teacher | Upload an NCERT PDF (multipart) to object storage (`storage_service`), then `pdf_toc_service.parse_bookmarks_or_toc()` (plain parsing, not AI) auto-fills Chapter/Topic `curriculum_nodes` rows with `confirmed = false` |
-| GET | `/api/books/{id}/curriculum` | any authed | The auto-filled + manually-entered tree so far |
-| PUT | `/api/books/{id}/curriculum/{node_id}` | teacher | Edit a node (name/page range) and/or set `confirmed = true` — how the teacher reviews auto-filled Chapter/Topic rows |
-| POST | `/api/books/{id}/curriculum/{topic_id}/subtopics` | teacher | Manually add one or more Subtopics under a Topic — array body, same single-vs-bulk pattern as § 2.2; rows are `confirmed = true` from creation |
+| GET | `/api/subjects` | any authed | List subjects |
+| GET | `/api/subjects/{id}/books` | any authed | List books for a subject |
+| GET | `/api/books/{id}/curriculum` | any authed | The full Chapter/Topic/Subtopic tree for that book |
+
+**Not building yet, but worth naming:** a teacher-facing edit route (e.g.
+`PUT /api/books/{id}/curriculum/{node_id}`) isn't built now — content is static once
+entered, so a rare correction is a one-off developer `UPDATE`, not worth an edit
+API/UI yet. Add it later if corrections turn out to be frequent in practice; see
+`../curriculum-taxonomy.md` § Building the Taxonomy.
 
 ### 2.4 Tests & Questions — `/api/classes/{class_id}/tests`, `/api/tests`
 
@@ -168,21 +178,23 @@ from typing import Literal
 
 class TokenData(BaseModel):
     id: int
-    role: Literal["teacher", "student"]
+    role: Literal["admin", "teacher", "student"]
     email: str
 ```
 
-**No per-teacher tenancy scoping (revised — see `accounts-and-roster.md` § Tenancy Model,
-reversible if ever needed).** Any authenticated teacher can view/manage any class, student,
-or (once built) test/submission/report, regardless of who created it. `classes` has no
-`teacher_id` column at all — removed, not just unfiltered — so no route or repository call
-has anything to scope by. One shared connection pool, no per-teacher `WHERE` isolation. This
-replaces the earlier row-level-tenancy model; `database-design.md` § Design Decisions still
-describes *why* a shared database was chosen over database-per-tenant, that part is
-unchanged — only the per-teacher access boundary (and the column it depended on) was removed.
+**Admin + class-scoped teacher tenancy (revised again — see `accounts-and-roster.md` §
+Tenancy Model for the full reasoning).** `role` lives on `teachers` (`teachers.role`, not
+a separate table) — an admin is a teacher with elevated permissions. Class access for a
+plain teacher is scoped by `class_teachers` (many-to-many: `class_id`, `teacher_id`); an
+admin bypasses that scoping entirely and can act on any class. This replaces the
+brief no-scoping-at-all revision — that version recreated the original problem (no one
+could grant class access without already having it); admin is the missing piece that
+lets access actually be granted. `database-design.md` § Design Decisions still describes
+*why* a shared database was chosen over database-per-tenant, that part is unchanged.
 
-- `get_current_teacher` / `get_current_student` — FastAPI dependencies, role check on the decoded token. This is still required — the removed boundary is teacher-vs-teacher, not the teacher/student role split itself.
-- A student's own-data routes (`GET /api/submissions/{id}`, `GET /api/students/{id}/report`) still check `current_student.id == {id}` (or, for a submission, that `submissions.student_id == current_student.id`) — this boundary is unaffected by the tenancy change above; students still only ever see their own data, never another student's.
+- `get_current_teacher` — role must be exactly `"teacher"` (excludes admin). `get_current_admin` — role must be exactly `"admin"`. `get_current_teacher_or_admin` — either role; the handler branches (`if current_user.role == "admin"`) to bypass scoping for admins and apply it for teachers. All three are FastAPI dependencies on the decoded token, same mechanism as `get_current_student`.
+- `_ensure_assigned_or_admin(class_id, current_user)` (`class_router.py`) — the actual scoping check: admin always passes; a teacher must have a `class_teachers` row for that class, else `CLASS_NOT_FOUND` (not `FORBIDDEN` — don't reveal the class exists to an unassigned teacher). Same "fetch, compare, don't leak existence" pattern used everywhere else in this API.
+- A student's own-data routes (`GET /api/submissions/{id}`, `GET /api/students/{id}/report`) still check `current_student.id == {id}` (or, for a submission, that `submissions.student_id == current_student.id`) — unaffected by any of the above; students still only ever see their own data, never another student's.
 
 ---
 
@@ -190,33 +202,27 @@ unchanged — only the per-teacher access boundary (and the column it depended o
 
 ### 4a. Building the Curriculum Taxonomy (`../curriculum-taxonomy.md` § Building the Taxonomy)
 
-A small, largely manual, one-time-per-book flow — not an automated ingestion pipeline.
+Developer-authored, offline, not an app flow — no request/response cycle at all:
 
 ```
-POST /subjects/{id}/books  (multipart PDF)
+Developer reads the book's TOC page(s) (Chapter/Topic) and relevant chapter text (Subtopic)
         │
         ▼
-  storage_service.upload()  →  ncert_books.pdf_url
+  Uploads to Claude/ChatGPT (web app, not API) to draft a Chapter → Topic → Subtopic breakdown
         │
         ▼
-  pdf_toc_service.parse_bookmarks_or_toc()  (plain structured-data parsing, NOT AI —
-        │                                     the book's own printed contents is the answer)
-        ▼
-  curriculum_nodes rows written for Chapter + Topic, confirmed = false
+  Developer verifies the draft against the actual book, corrects anything wrong/vague
         │
         ▼
-  [teacher reviews: GET /books/{id}/curriculum, PUT .../curriculum/{node_id} to
-   edit/confirm each Chapter/Topic row]
+  Final structure entered directly into subjects/ncert_books/curriculum_nodes via SQL
+  seed/script — no POST endpoint, no confirm flow, no teacher-facing UI
         │
         ▼
-  [teacher manually adds Subtopics: POST /books/{id}/curriculum/{topic_id}/subtopics
-   — the one step needing real judgment, based on reading that section of the book]
-        │
-        ▼
-  taxonomy ready for this book — usable by any test in this subject from now on
+  taxonomy ready for this book — usable by any test in this subject from now on;
+  the app only ever reads it (GET /api/subjects, GET /api/books/{id}/curriculum)
 ```
 
-No staging tables, no per-page text extraction, no per-chapter AI call, no embeddings.
+No staging tables, no PDF-parsing service, no per-chapter AI call at request time, no embeddings.
 
 ### 4b. Question → Node Mapping (test setup)
 
@@ -305,8 +311,7 @@ unnecessary once the taxonomy is small and unsummarized.
 | Service | Interface | Swappable providers | Notes |
 |---|---|---|---|
 | `cv_ocr_service.py` | `ICvOcrService` | **v1:** one AI-vision call reads every sheet directly, no caching, no registration — chosen over a cached-template/CV-first design specifically to avoid unvalidated registration risk before real usage justifies the added complexity; see `omr-extraction-strategy.md` for the reasoning and the deferred cached-template design | `detect_bubbles()` only — stateless, image in, structured result (answers + per-question confidence flags) out. No handwriting/OCR method on the interface at all; added when subjective grading is actually built, as its own PR. **Cost note:** a real per-submission AI cost, not free-CV — small and bounded at typical class sizes, but not zero; see `omr-extraction-strategy.md` § What still needs deciding for the open cost-at-scale question |
-| `pdf_toc_service.py` | `IPdfTocService` | Any PDF-parsing library that can read bookmarks/outline metadata, or fall back to parsing a printed contents page | Used only at book-setup time — one-time per book (12 books total), not a recurring pipeline |
-| `llm_service.py` | `ILlmService` | Anthropic (Claude), OpenAI (GPT), etc. | Three calls across the pipelines (§4b, §4c fallback, §4d) — question-mapping is given one subject's whole taxonomy directly (small enough, no shortlisting needed), never a whole book's raw text |
+| `llm_service.py` | `ILlmService` | Anthropic (Claude), OpenAI (GPT), etc. | Three calls across the pipelines (§4b, §4c fallback, §4d) — question-mapping is given one subject's whole taxonomy directly (small enough, no shortlisting needed), never a whole book's raw text. No PDF-parsing service — taxonomy authoring is offline/developer-driven, not an app-level AI call (§4a) |
 | `storage_service.py` | `IStorageService` | S3-compatible object storage | DB stores keys/pointers, never file bytes — `ncert_books.pdf_url`, `submissions.image_url` (`database-design.md` §4) |
 
 Config keys: `LLM_PROVIDER`/`LLM_API_KEY`, `S3_*`, `DB_*`, `JWT_*`. Changing a provider
@@ -322,8 +327,8 @@ repository, or pipeline orchestration code.
 | Range | Domain | Examples |
 |---|---|---|
 | 2xxxx | Auth | `NO_TOKEN_PROVIDED` 20001·401, `INVALID_AUTH_TOKEN` 20002·401, `TOKEN_EXPIRED` 20003·401, `INVALID_CREDENTIALS` 20004·401, `FORBIDDEN` 20005·403, `INVALID_REFRESH_TOKEN` 20006·401, `INCORRECT_CURRENT_PASSWORD` 20007·401 (`PATCH /api/auth/password`) |
-| 3xxxx | Classes / Roster | `CLASS_NOT_FOUND` 30001·404, `STUDENT_NOT_IN_CLASS` 30002·404, `ROLL_NUMBER_TAKEN` 30003·409, `EMAIL_OR_PHONE_TAKEN` 30004·409 (per-role uniqueness, checked by both `POST /api/accounts/teachers` and `POST /api/accounts/students/bulk`) |
-| 4xxxx | Subjects / Books / Curriculum Taxonomy | `BOOK_NOT_FOUND` 40001·404, `NODE_BOUNDARY_INVALID` 40002·422 (`page_start > page_end`), `NODE_NOT_CONFIRMED` 40003·409 (test setup referencing an unconfirmed Chapter/Topic), `PDF_TOC_PARSE_FAILED` 40004·502 (falls back to a blank manual-entry screen rather than failing outright), `SUBJECT_NOT_FOUND` 40005·404, `CURRICULUM_NODE_NOT_FOUND` 40006·404 |
+| 3xxxx | Classes / Roster | `CLASS_NOT_FOUND` 30001·404 (also returned to a teacher not assigned to the class — don't reveal existence), `STUDENT_NOT_IN_CLASS` 30002·404, `ROLL_NUMBER_TAKEN` 30003·409, `EMAIL_OR_PHONE_TAKEN` 30004·409 (per-role uniqueness, checked by both `POST /api/accounts/teachers` and `POST /api/accounts/students/bulk`), `TEACHER_NOT_FOUND` 30005·404 (`POST /api/classes/{id}/teachers`) |
+| 4xxxx | Subjects / Books / Curriculum Taxonomy | `BOOK_NOT_FOUND` 40001·404, `SUBJECT_NOT_FOUND` 40005·404, `CURRICULUM_NODE_NOT_FOUND` 40006·404 — all read-only lookups, since this data is developer-seeded, not written through the API (`../curriculum-taxonomy.md` § Building the Taxonomy) |
 | 5xxxx | Tests / Questions | `TEST_NOT_FOUND` 50001·404, `TEST_ALREADY_PUBLISHED` 50002·409, `QUESTION_PAPER_PARSE_FAILED` 50003·502, `NODE_NOT_IN_SUBJECT_SCOPE` 50004·422, `QUESTION_NOT_FOUND` 50005·404 |
 | 6xxxx | Submissions / Grading | `SUBMISSION_NOT_FOUND` 60001·404, `DUPLICATE_SUBMISSION` 60002·409 (`UNIQUE (test_id, student_id)`), `ANSWER_NOT_FOUND` 60003·404 — `QR_STUDENT_MISMATCH`/`ROLL_NUMBER_MISMATCH`/`MATCH_ALREADY_RESOLVED` deferred to Phase 2 with the identification features they belong to |
 | 7xxxx | Reports | `NO_RESULTS_YET` 70001·404 |
@@ -338,7 +343,7 @@ See `backend-guide.md` §11 for the mechanics. Priority scenarios per layer:
 
 | Layer | Priority scenarios |
 |---|---|
-| Routers | Test publish locking `question_node_map`, submission upload always scoped to the caller's own `student_id`, report evidence-filtering (weak nodes only), curriculum-node `confirmed` gating |
+| Routers | Test publish locking `question_node_map`, submission upload always scoped to the caller's own `student_id`, report evidence-filtering (weak nodes only) |
 | Repositories | `UNIQUE (test_id, student_id)` on submissions, tree rollup query at fixed depth, cursor pagination |
 | Services | `Result` mapping for every failure mode per provider, bubble fill-percentage thresholds against fixture images |
 
@@ -348,7 +353,7 @@ See `backend-guide.md` §11 for the mechanics. Priority scenarios per layer:
 
 1. **Skeleton** — settings, utils (`errors`/`responses`/`logger`/`jwt`/`result`), middleware, DB pool, `main.py`, Docker
 2. **Auth + Classes/Roster** — teacher/student login, class CRUD, enrollments (unlocks everything scoped to a class)
-3. **Subjects + Curriculum Taxonomy** — upload → PDF bookmark/TOC parse → teacher confirms Chapter/Topic → teacher adds Subtopics (needed before any test can be set up in a subject)
+3. **Subjects + Curriculum Taxonomy** — developer-seeded directly in the DB (read-only via the API); needed before any test can be set up in a subject
 4. **cv_ocr_service** — AI-vision bubble reading (§5, `omr-extraction-strategy.md`); handwriting OCR deferred
 5. **Tests + Questions** — Path A/B setup, whole-taxonomy question mapping + AI pick, publish lock
 6. **Submissions** — upload (login-only identification, v1), MCQ grading (mechanical), confidence flagging/review. Subjective grading deferred.

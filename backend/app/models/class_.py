@@ -22,3 +22,7 @@ class ClassDetail(BaseModel):
 
 class TransferEnrollmentRequest(BaseModel):
     new_class_id: int
+
+
+class AssignTeacherRequest(BaseModel):
+    teacher_id: int

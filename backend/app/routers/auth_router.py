@@ -1,5 +1,3 @@
-from typing import Literal
-
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
@@ -28,7 +26,7 @@ async def teacher_login(body: TeacherLoginRequest) -> JSONResponse:
     if result.is_err() or not verify_password(body.password, result.value.password_hash):
         return _err(ERRORS["INVALID_CREDENTIALS"])
     teacher = result.value
-    token_data = TokenData(id=teacher.id, role="teacher", email=teacher.email)
+    token_data = TokenData(id=teacher.id, role=teacher.role, email=teacher.email)
     payload = LoginResponse(
         user=to_teacher_view(teacher),
         auth_token=create_auth_token(token_data),
@@ -66,11 +64,11 @@ async def refresh_token(body: RefreshTokenRequest) -> JSONResponse:
 async def change_password(
     body: ChangePasswordRequest, current_user: TokenData = Depends(get_current_user)
 ) -> JSONResponse:
-    repo: Literal["teacher", "student"] = current_user.role
+    is_student = current_user.role == "student"
     account_result = (
-        TeacherRepository.find_by_id(current_user.id)
-        if repo == "teacher"
-        else StudentRepository.find_by_id(current_user.id)
+        StudentRepository.find_by_id(current_user.id)
+        if is_student
+        else TeacherRepository.find_by_id(current_user.id)
     )
     if account_result.is_err():
         return _err(account_result.error)
@@ -80,9 +78,9 @@ async def change_password(
 
     new_hash = hash_password(body.new_password)
     update_result = (
-        TeacherRepository.update_password_hash(current_user.id, new_hash)
-        if repo == "teacher"
-        else StudentRepository.update_password_hash(current_user.id, new_hash)
+        StudentRepository.update_password_hash(current_user.id, new_hash)
+        if is_student
+        else TeacherRepository.update_password_hash(current_user.id, new_hash)
     )
     if update_result.is_err():
         return _err(update_result.error)

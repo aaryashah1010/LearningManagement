@@ -26,6 +26,18 @@ def get_current_teacher(token_data: TokenData = Depends(_get_token_data)) -> Tok
     return token_data
 
 
+def get_current_admin(token_data: TokenData = Depends(_get_token_data)) -> TokenData:
+    if token_data.role != "admin":
+        raise app_error_to_http_exception(ERRORS["FORBIDDEN"])
+    return token_data
+
+
+def get_current_teacher_or_admin(token_data: TokenData = Depends(_get_token_data)) -> TokenData:
+    if token_data.role not in ("teacher", "admin"):
+        raise app_error_to_http_exception(ERRORS["FORBIDDEN"])
+    return token_data
+
+
 def get_current_student(token_data: TokenData = Depends(_get_token_data)) -> TokenData:
     if token_data.role != "student":
         raise app_error_to_http_exception(ERRORS["FORBIDDEN"])

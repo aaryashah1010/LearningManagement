@@ -40,13 +40,9 @@ ERRORS: dict[str, AppError] = {
     "STUDENT_NOT_IN_CLASS": AppError("Student is not in this class", 30002, 404),
     "ROLL_NUMBER_TAKEN": AppError("Roll number already in use for this class", 30003, 409),
     "EMAIL_OR_PHONE_TAKEN": AppError("Email or phone is already registered for this role", 30004, 409),
+    "TEACHER_NOT_FOUND": AppError("Teacher not found", 30005, 404),
     # ─── Subjects / Books / Curriculum Taxonomy (4xxxx) ─────────────────
     "BOOK_NOT_FOUND": AppError("Book not found", 40001, 404),
-    "NODE_BOUNDARY_INVALID": AppError("page_start must be <= page_end", 40002, 422),
-    "NODE_NOT_CONFIRMED": AppError("Curriculum node is not confirmed yet", 40003, 409),
-    "PDF_TOC_PARSE_FAILED": AppError(
-        "Could not parse chapter/topic from PDF — falling back to manual entry", 40004, 502
-    ),
     "SUBJECT_NOT_FOUND": AppError("Subject not found", 40005, 404),
     "CURRICULUM_NODE_NOT_FOUND": AppError("Curriculum node not found", 40006, 404),
     # ─── Tests / Questions (5xxxx) ───────────────────────────────────────

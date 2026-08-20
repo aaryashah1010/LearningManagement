@@ -1,8 +1,11 @@
+from datetime import date
 from typing import Protocol
+
+from mysql.connector.errors import IntegrityError
 
 from app.database.pool import execute, fetch_all, fetch_one, transaction
 from app.models.class_ import Class, ClassDetail
-from app.models.student import StudentView
+from app.models.student import Student, StudentView
 from app.types.pagination import PageInfo, Paginated
 from app.utils.errors import ERRORS, AppError
 from app.utils.logger import get_logger
@@ -21,6 +24,15 @@ class IClassRepository(Protocol):
     def detail(self, class_id: int) -> Result[ClassDetail, AppError]: ...
     def list_all(self, cursor: int | None, limit: int) -> Result[Paginated[Class], AppError]: ...
     def enroll(self, class_id: int, student_id: int) -> Result[None, AppError]: ...
+    def enroll_new_or_matched_student(
+        self,
+        class_id: int,
+        name: str,
+        email: str | None,
+        phone: str | None,
+        date_of_birth: date,
+        password_hash: str,
+    ) -> Result[Student, AppError]: ...
     def is_enrolled(self, class_id: int, student_id: int) -> Result[bool, AppError]: ...
     def remove_enrollment(self, class_id: int, student_id: int) -> Result[None, AppError]: ...
     def transfer_enrollment(
@@ -29,6 +41,12 @@ class IClassRepository(Protocol):
     def list_enrollments(
         self, class_id: int, cursor: int | None, limit: int
     ) -> Result[Paginated[StudentView], AppError]: ...
+    def assign_teacher(self, class_id: int, teacher_id: int) -> Result[None, AppError]: ...
+    def unassign_teacher(self, class_id: int, teacher_id: int) -> Result[None, AppError]: ...
+    def is_teacher_assigned(self, class_id: int, teacher_id: int) -> Result[bool, AppError]: ...
+    def list_assigned_classes(
+        self, teacher_id: int, cursor: int | None, limit: int
+    ) -> Result[Paginated[Class], AppError]: ...
 
 
 class ClassRepositoryImpl(IClassRepository):
@@ -98,6 +116,53 @@ class ClassRepositoryImpl(IClassRepository):
                 (class_id, student_id),
             )
             return ok(None)
+        except Exception:
+            logger.exception("Error enrolling student")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def enroll_new_or_matched_student(
+        self,
+        class_id: int,
+        name: str,
+        email: str | None,
+        phone: str | None,
+        date_of_birth: date,
+        password_hash: str,
+    ) -> Result[Student, AppError]:
+        try:
+            with transaction() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute(
+                    "SELECT * FROM students WHERE (email = %s AND email IS NOT NULL) "
+                    "OR (phone = %s AND phone IS NOT NULL)",
+                    (email, phone),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    cursor.execute(
+                        "INSERT INTO students (name, email, phone, date_of_birth, password_hash) "
+                        "VALUES (%s, %s, %s, %s, %s)",
+                        (name, email, phone, date_of_birth, password_hash),
+                    )
+                    student_id = cursor.lastrowid
+                else:
+                    student_id = row["id"]
+
+                cursor.execute(
+                    "SELECT id FROM class_enrollments WHERE class_id = %s AND student_id = %s",
+                    (class_id, student_id),
+                )
+                if cursor.fetchone() is None:
+                    cursor.execute(
+                        "INSERT INTO class_enrollments (class_id, student_id) VALUES (%s, %s)",
+                        (class_id, student_id),
+                    )
+
+                cursor.execute("SELECT * FROM students WHERE id = %s", (student_id,))
+                student_row = cursor.fetchone()
+            return ok(Student(**student_row))
+        except IntegrityError:
+            return err(ERRORS["EMAIL_OR_PHONE_TAKEN"])
         except Exception:
             logger.exception("Error enrolling student")
             return err(ERRORS["DATABASE_ERROR"])
@@ -181,6 +246,72 @@ class ClassRepositoryImpl(IClassRepository):
             )
         except Exception:
             logger.exception("Error listing enrollments")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def assign_teacher(self, class_id: int, teacher_id: int) -> Result[None, AppError]:
+        try:
+            teacher_row = fetch_one("SELECT id FROM teachers WHERE id = %s", (teacher_id,))
+            if teacher_row is None:
+                return err(ERRORS["TEACHER_NOT_FOUND"])
+            already = self.is_teacher_assigned(class_id, teacher_id)
+            if already.is_err():
+                return err(already.error)
+            if already.value:
+                return ok(None)
+            execute(
+                "INSERT INTO class_teachers (class_id, teacher_id) VALUES (%s, %s)",
+                (class_id, teacher_id),
+            )
+            return ok(None)
+        except Exception:
+            logger.exception("Error assigning teacher")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def unassign_teacher(self, class_id: int, teacher_id: int) -> Result[None, AppError]:
+        try:
+            execute(
+                "DELETE FROM class_teachers WHERE class_id = %s AND teacher_id = %s",
+                (class_id, teacher_id),
+            )
+            return ok(None)
+        except Exception:
+            logger.exception("Error unassigning teacher")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def is_teacher_assigned(self, class_id: int, teacher_id: int) -> Result[bool, AppError]:
+        try:
+            row = fetch_one(
+                "SELECT id FROM class_teachers WHERE class_id = %s AND teacher_id = %s",
+                (class_id, teacher_id),
+            )
+            return ok(row is not None)
+        except Exception:
+            logger.exception("Error checking teacher assignment")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def list_assigned_classes(
+        self, teacher_id: int, cursor: int | None, limit: int
+    ) -> Result[Paginated[Class], AppError]:
+        try:
+            rows = fetch_all(
+                "SELECT c.* FROM classes c "
+                "JOIN class_teachers ct ON ct.class_id = c.id "
+                "WHERE ct.teacher_id = %s AND c.id > %s ORDER BY c.id ASC LIMIT %s",
+                (teacher_id, cursor or 0, limit + 1),
+            )
+            has_next = len(rows) > limit
+            page_rows = rows[:limit]
+            return ok(
+                Paginated(
+                    data=[Class(**r) for r in page_rows],
+                    pagination=PageInfo(
+                        has_next=has_next,
+                        next_cursor=page_rows[-1]["id"] if has_next else None,
+                    ),
+                )
+            )
+        except Exception:
+            logger.exception("Error listing assigned classes")
             return err(ERRORS["DATABASE_ERROR"])
 
 

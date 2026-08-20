@@ -7,12 +7,13 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 ## 0. Project Structure
 
 - `backend/` — Python + FastAPI, `app/utils/result.py` Result pattern (no stray exceptions
-  from business logic), one shared MySQL database (not database-per-tenant). No per-teacher
-  access scoping — any authenticated teacher can act on any class/student; `classes` has no
-  `teacher_id` column (removed, reversible if this is ever needed — see
-  `accounts-and-roster.md` § Tenancy Model). Style guide: `docs/backend/backend-guide.md`.
-  Module/endpoint inventory, pipelines, error catalog: `docs/backend/backend-architecture.md`.
-  Schema source of truth: `docs/backend/database-design.md`. OMR extraction design:
+  from business logic), one shared MySQL database (not database-per-tenant). Three roles:
+  `admin` (a `teachers.role` value, not a separate table — creates teacher/student
+  accounts, creates classes, assigns teachers to classes), `teacher` (scoped to classes
+  they're assigned to via `class_teachers`), `student`. See `accounts-and-roster.md` §
+  Tenancy Model. Style guide: `docs/backend/backend-guide.md`. Module/endpoint inventory,
+  pipelines, error catalog: `docs/backend/backend-architecture.md`. Schema source of
+  truth: `docs/backend/database-design.md`. OMR extraction design:
   `docs/backend/omr-extraction-strategy.md`.
 - No frontend yet — web vs. native app is still an open decision, not started.
 - `docs/` — all product and architecture docs. Check here before assuming something isn't
@@ -20,8 +21,7 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
   scope for now** — its own future PR, nothing subjective-specific should appear in
   `backend/`), `curriculum-taxonomy.md` (the manually-entered Chapter→Topic→Subtopic tree
   — no AI ingestion pipeline, no embeddings, locked at 3 levels), `accounts-and-roster.md`
-  (Teacher/Class/Student model, shared teacher visibility, teacher-issued accounts only,
-  no self-registration).
+  (Admin/Teacher/Class/Student model, admin-issued accounts only, no self-registration).
 - `refrence/` — a different project's docs, kept only as a style reference for the
   Result-pattern/repository conventions this project's own `backend-guide.md` was adapted
   from. Not part of this product — never treat its content as this project's own design.
