@@ -312,9 +312,9 @@ unnecessary once the taxonomy is small and unsummarized.
 |---|---|---|---|
 | `cv_ocr_service.py` | `ICvOcrService` | **v2:** pure OpenCV against one fixed, project-owned sheet template (corner fiducial markers → deskew → fixed bubble positions → fill-ratio read), no AI, no per-sheet cost — viable specifically because the sheet layout is fixed and known in advance, not arbitrary; see `omr-extraction-strategy.md` for the full reasoning | `detect_bubbles()` only — stateless, image in, structured result (answers + per-question `needs_review` flags) out. No handwriting/OCR method on the interface at all; added when subjective grading is actually built, as its own PR |
 | `llm_service.py` | `ILlmService` | Anthropic (Claude), OpenAI (GPT), etc. | Three calls across the pipelines (§4b, §4c fallback, §4d) — question-mapping is given one subject's whole taxonomy directly (small enough, no shortlisting needed), never a whole book's raw text. No PDF-parsing service — taxonomy authoring is offline/developer-driven, not an app-level AI call (§4a) |
-| `storage_service.py` | `IStorageService` | S3-compatible object storage | DB stores keys/pointers, never file bytes — `ncert_books.pdf_url`, `submissions.image_url` (`database-design.md` §4) |
+| `storage_service.py` | `IStorageService` | **Implemented:** local disk (`STORAGE_PROVIDER=local`, dev/test default, no cloud credentials needed) — S3 is the documented production target but not implemented yet, so selecting it raises clearly rather than silently doing nothing | DB stores keys/pointers, never file bytes — `ncert_books.pdf_url`, `submissions.image_url` (`database-design.md` §4) |
 
-Config keys: `LLM_PROVIDER`/`LLM_API_KEY`, `S3_*`, `DB_*`, `JWT_*`. Changing a provider
+Config keys: `LLM_PROVIDER`/`LLM_API_KEY`, `STORAGE_PROVIDER`/`LOCAL_STORAGE_PATH`/`S3_*`, `DB_*`, `JWT_*`. Changing a provider
 is a config value + one new implementation class — zero changes to any router,
 repository, or pipeline orchestration code.
 

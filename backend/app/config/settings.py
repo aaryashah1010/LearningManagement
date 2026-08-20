@@ -28,11 +28,14 @@ class Settings(BaseSettings):
 
     CV_OCR_PROVIDER: Literal["opencv"] = "opencv"
 
-    # Object storage
-    S3_BUCKET: str
-    S3_REGION: str
-    S3_ACCESS_KEY_ID: str
-    S3_SECRET_ACCESS_KEY: str
+    # Object storage — "local" writes to disk for dev, no cloud credentials needed
+    STORAGE_PROVIDER: Literal["local", "s3"] = "local"
+    LOCAL_STORAGE_PATH: str = "./uploads"
+
+    S3_BUCKET: str = ""
+    S3_REGION: str = ""
+    S3_ACCESS_KEY_ID: str = ""
+    S3_SECRET_ACCESS_KEY: str = ""
 
 
 settings = Settings()
