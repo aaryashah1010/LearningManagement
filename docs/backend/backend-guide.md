@@ -44,10 +44,10 @@ app/
 ├── repositories/
 │   ├── teacher_repository.py               #  + test_teacher_repository.py (testcontainers) for every repository
 │   ├── student_repository.py
-│   ├── class_repository.py                 # no per-teacher scoping — any teacher can act on any class (§ Auth & Tenancy in backend-architecture.md)
+│   ├── class_repository.py                 # class_teachers scoping — admin bypasses it, teacher restricted to assigned classes (§ Auth & Tenancy in backend-architecture.md)
 │   ├── subject_repository.py
 │   ├── book_repository.py                  # ncert_books
-│   ├── curriculum_node_repository.py       # curriculum_nodes CRUD + the plain-join tree reads
+│   ├── curriculum_node_repository.py       # curriculum_nodes read-only (developer-seeded) + the plain-join tree reads
 │   ├── test_repository.py
 │   ├── question_repository.py
 │   ├── submission_repository.py
@@ -58,17 +58,16 @@ app/
 │   ├── accounts_router.py                  # /api/accounts — teacher/student account creation, separate endpoints (see accounts-and-roster.md)
 │   ├── class_router.py
 │   ├── subject_router.py
-│   ├── book_router.py                      # curriculum taxonomy endpoints
+│   ├── book_router.py                      # curriculum taxonomy — GET only, data is developer-seeded
 │   ├── test_router.py
 │   ├── submission_router.py
 │   └── report_router.py
 ├── services/
 │   ├── cv_ocr_service.py                   # ICvOcrService — see § Service Layer & Provider Abstraction below
-│   ├── pdf_toc_service.py                  # IPdfTocService — bookmark/TOC parsing, not full-text extraction
 │   ├── llm_service.py                      # ILlmService
 │   └── storage_service.py                  # IStorageService
 ├── middleware/
-│   ├── auth.py                             # get_current_teacher, get_current_student, require_own_class (FastAPI dependencies)
+│   ├── auth.py                             # get_current_admin, get_current_teacher, get_current_teacher_or_admin, get_current_student (FastAPI dependencies)
 │   ├── error_handlers.py                   # exception handlers registered on the app
 │   └── rate_limit.py
 ├── types/
@@ -414,8 +413,11 @@ The router's code never changes if `LLM_PROVIDER` flips from `"anthropic"` to `"
 |---|---|---|
 | `llm_service.py` | `ILlmService` | Anthropic (Claude), OpenAI (GPT), etc. |
 | `cv_ocr_service.py` | `ICvOcrService` | AI-vision or a future OpenCV/hosted-vendor swap — `detect_bubbles()` only, no handwriting/OCR method (subjective grading is its own future PR) |
-| `pdf_toc_service.py` | `IPdfTocService` | Any PDF-parsing library that can read bookmarks/outline metadata — swappable without touching any calling code |
 | `storage_service.py` | `IStorageService` | S3, GCS, any S3-compatible provider |
+
+No `pdf_toc_service.py`/`IPdfTocService` — curriculum taxonomy is developer-seeded
+offline (an AI chat tool as a drafting aid, verified against the book, entered via SQL),
+not parsed by the app at all. See `../curriculum-taxonomy.md` § Building the Taxonomy.
 
 No `embedding_service.py` — dropped entirely, not just deferred. It existed to shortlist
 candidates before a question-mapping AI call; unnecessary once one subject's whole
@@ -455,7 +457,7 @@ async def get_class(class_id: int, teacher: TokenData = Depends(get_current_teac
 ```
 
 ### Router rules
-- Auth/role checks are FastAPI **dependencies** (`Depends(get_current_teacher)`), not manual `if` checks scattered per-route — same intent as the Node guide's middleware chain (`authenticate → requireX → validateRequest → handler`), expressed as FastAPI's own dependency system. This is the *one* place the app is allowed to raise (`Depends()` can only short-circuit by raising — there's no way for a dependency to "return" an error the way a route body can), and even there it raises via `app_error_to_http_exception` (`utils/responses.py`), which builds its body from the same `error_response()` helper, so the JSON shape is identical either way. There's no per-teacher ownership dependency (no `require_own_class`) — any teacher can act on any class, see `accounts-and-roster.md` § Tenancy Model.
+- Auth/role checks are FastAPI **dependencies** (`Depends(get_current_teacher)`), not manual `if` checks scattered per-route — same intent as the Node guide's middleware chain (`authenticate → requireX → validateRequest → handler`), expressed as FastAPI's own dependency system. This is the *one* place the app is allowed to raise (`Depends()` can only short-circuit by raising — there's no way for a dependency to "return" an error the way a route body can), and even there it raises via `app_error_to_http_exception` (`utils/responses.py`), which builds its body from the same `error_response()` helper, so the JSON shape is identical either way. Class-scoping isn't a `Depends()` — it's a plain function (`_ensure_assigned_or_admin`, `class_router.py`) called inside each route, since which class is being accessed only becomes known from the path parameter, after the dependency has already resolved; see `accounts-and-roster.md` § Tenancy Model.
 - **Routers never raise for a Result-derived error.** Match on `is_err()` and return a `JSONResponse` built from `error_response()`/`success_response()` directly — never `raise HTTPException(...)`, and never hand-build the response dict inline. The error `code` always comes from an `ERRORS[...]` entry, never typed by hand at the call site.
 - Request/response bodies are Pydantic models — FastAPI validates them automatically; no separate manual validation step is needed (this replaces the Node guide's Zod `validate-request` middleware). A validation failure still surfaces through `error_response()` — see the `RequestValidationError` handler in `middleware/error_handlers.py`, which exists as a safety net, not something routers call into directly.
 

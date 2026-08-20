@@ -1,4 +1,10 @@
+from datetime import date
+
 import bcrypt
+
+
+def password_from_dob(dob: date) -> str:
+    return dob.strftime("%d%m%Y")
 
 
 def hash_password(plain: str) -> str:

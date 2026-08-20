@@ -3,10 +3,9 @@ from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from typing import Any
 
-import mysql.connector
 from mysql.connector import Error as MySQLError
 from mysql.connector import pooling
-from mysql.connector.abstracts import MySQLConnectionAbstract
+from mysql.connector.pooling import PooledMySQLConnection
 
 from app.config.settings import settings
 from app.utils.logger import get_logger
@@ -14,14 +13,6 @@ from app.utils.logger import get_logger
 logger = get_logger("database")
 
 _pool: pooling.MySQLConnectionPool | None = None
-
-_DB_KWARGS = {
-    "host": settings.DB_HOST,
-    "port": settings.DB_PORT,
-    "user": settings.DB_USER,
-    "password": settings.DB_PASSWORD,
-    "database": settings.DB_NAME,
-}
 
 
 def get_pool() -> pooling.MySQLConnectionPool:
@@ -32,7 +23,11 @@ def get_pool() -> pooling.MySQLConnectionPool:
             pool_name="lm_pool",
             pool_size=10,
             autocommit=True,
-            **_DB_KWARGS,
+            host=settings.DB_HOST,
+            port=settings.DB_PORT,
+            user=settings.DB_USER,
+            password=settings.DB_PASSWORD,
+            database=settings.DB_NAME,
         )
     return _pool
 
@@ -82,10 +77,12 @@ def execute(query: str, params: Sequence[Any] = ()) -> int:
 
 
 @contextmanager
-def transaction() -> Generator[MySQLConnectionAbstract, None, None]:
-    # Non-pooled on purpose — pooled connections are fixed at autocommit=True (see get_pool()).
-    conn = mysql.connector.connect(autocommit=False, **_DB_KWARGS)
+def transaction() -> Generator[PooledMySQLConnection, None, None]:
+    # start_transaction()/commit()/rollback(), not conn.autocommit — reliable on a pooled connection.
+    # Use conn's own cursor inside this block — fetch_all/fetch_one/execute grab a different connection.
+    conn = get_pool().get_connection()
     try:
+        conn.start_transaction()
         yield conn
         conn.commit()
     except Exception:

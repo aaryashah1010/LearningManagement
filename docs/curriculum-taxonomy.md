@@ -60,33 +60,37 @@ Matching (below) uses the node's own name plus its path, not any authored descri
 
 ## Building the Taxonomy
 
-One-time, per book (12 books total, not a recurring pipeline):
+**Revised — developer-authored, not a teacher-facing app feature.** One-time, per book
+(12 books total, not a recurring pipeline), done by a developer directly against the
+database, the same way the first teacher account is seeded rather than created through
+an API route:
 
-1. **Teacher uploads the book PDF once**, per subject/class.
-2. **Plain PDF parsing (not AI) auto-fills Chapter and Topic.** Reading the PDF's
-   bookmarks/outline, or its own printed table of contents, gives chapter names and page
-   ranges directly; topic names come from section headers the same way. This is
-   structured-data extraction, not AI judgment — the book's own printed contents *is*
-   the correct answer, nothing to infer. Auto-filled rows are written with
-   `confirmed = false`.
-3. **Teacher reviews and confirms/corrects** the auto-filled Chapter/Topic list — quick
-   confirmation, not typing from scratch, since parsing did the heavy lifting. Setting
-   `confirmed = true` locks each row in.
-4. **Teacher manually adds Subtopics** under each Topic, based on their own reading of
-   that section — the one step that's genuinely manual entry, not extraction. Subtopic
-   rows are `confirmed = true` from creation (no separate review step needed for
-   something a person typed directly).
-5. Authoring can happen via a simple form, or as a JSON file a teacher edits and uploads
-   (`{"Chapter name": {"Topic name": ["Subtopic", ...]}}`) — either way, it's parsed into
-   the same table described below. The authoring format and the storage format are
-   separate concerns: simple JSON/a form for editing, a normal queryable table
-   underneath, since reports need to efficiently aggregate potentially thousands of
-   answer rows grouped by node — a JSON blob re-parsed per request doesn't serve that
-   well, a table with foreign keys does.
+1. **Open the book's table-of-contents page(s)** for Chapter/Topic names and page
+   ranges — already printed, nothing to infer.
+2. **Upload those TOC pages (and, for Subtopics, the relevant chapter's full text) to
+   Claude or ChatGPT** — the web app, not an API call — and ask it to draft a
+   structured Chapter → Topic → Subtopic breakdown. This is a drafting aid, not a
+   pipeline: one-off, human-supervised, never repeated or trusted unverified.
+3. **Verify the draft against the actual book** before entering anything — Chapter/Topic
+   against the printed page (a transcription check), Subtopic against the bar in
+   [Open Questions](#open-questions): each one should be *"a single atomic, testable
+   idea."* Correct anything the AI got wrong, too vague, or split oddly.
+4. **Enter the final, verified structure directly into `curriculum_nodes`** — a SQL
+   seed/script, not an app endpoint. There is no `POST /api/subjects/{id}/books`
+   upload, no in-app PDF parsing, no `confirmed`/review flow — every row is entered
+   whole and correct, not proposed-then-confirmed.
 
-No staging tables, no per-page text extraction, no per-chapter AI call, no embedding
-step. The whole flow for one book is: upload → auto-fill (fast, non-AI) → confirm →
-add subtopics → done.
+No staging tables, no PDF-parsing service, no per-chapter AI call at request time, no
+embedding step, and — unlike the earlier design — no teacher-facing upload/confirm UI
+at all. The app only ever *reads* this data (test setup, question mapping, reports);
+it's never written to through the API.
+
+**Not building yet, but worth naming:** teacher-facing editing (fixing a typo, adding a
+missed subtopic) isn't built now — content is static once entered, so a rare correction
+is a one-off `UPDATE` a developer runs directly, not worth a whole edit API/UI for. If
+corrections turn out to be frequent in practice, add a scoped write path then (e.g. a
+`PUT /api/books/{id}/curriculum/{node_id}` for teachers) — this doesn't block that, since
+the underlying `curriculum_nodes` table doesn't change shape either way.
 
 ## Mapping Questions onto the Taxonomy
 

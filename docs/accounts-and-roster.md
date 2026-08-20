@@ -4,71 +4,100 @@
 
 [OMR grading](omr-grading.md) and [subjective grading](subjective-grading.md) both assume "a teacher login" and "a student login" exist, but neither says how those accounts come to exist, who manages the roster, or what stops one teacher from seeing another teacher's students. This doc covers that foundation — it's not specific to either grading module, both depend on it.
 
-## Tenancy Model — Shared Visibility, No Per-Teacher Scoping (Revised)
+## Tenancy Model — Admin + Class-Scoped Teachers (Revised again)
 
-**Decided:** for now, all teachers share visibility over all classes and students — there is
-no per-teacher ownership boundary. Any authenticated teacher can view/manage any class,
-enroll/transfer/remove any student, and (once built) any test/submission/report, regardless
-of who created it. `classes` has **no `teacher_id` column at all** — it was removed
-entirely, not just left unused, since nothing read it (no access check, no "created by"
-display — there's no frontend yet).
+**Decided:** a third role, `admin`, sits above `teacher` — stored as `teachers.role`
+(`'teacher'` or `'admin'`), not a separate table or account type. An admin is a
+"super-teacher": creates teacher accounts, creates student accounts, creates classes, and
+assigns teachers to classes. A plain teacher is scoped to only the classes they've been
+assigned to via `class_teachers` (many-to-many — a teacher can be assigned to several
+classes, a class can have more than one teacher, e.g. different subjects):
 
 ```
-Teacher (any)
-  └─ Class (batch)
-        └─ Students (enrolled)
+Admin
+  ├─ creates Teacher accounts, Student accounts, Classes
+  └─ assigns Teacher ↔ Class  (class_teachers)
+
+Teacher (scoped)
+  └─ Class (only ones they're assigned to)
+        └─ Students (enrolled) — view roster, remove/transfer within assigned classes
 ```
 
-This fits a small tuition where the teaching staff already trust each other and effectively
-work as one team — a per-teacher access boundary was solving a problem that doesn't exist yet
-at that scale, and was adding real complexity (every list/detail query needed an ownership
-check, plus a column nothing else used) for no current benefit.
+**Why this exists at all:** an earlier revision removed per-teacher scoping entirely (any
+teacher could act on any class) because a bare ownership boundary alone recreates the
+original problem — no one could add a new teacher to a class, or move a student across
+teachers, without already having the access to do it. Admin is the piece that was missing:
+someone has to be able to grant that access in the first place. Without an admin layer,
+scoping is just a wall with no door.
 
-**This is explicitly reversible — not a one-way door.** If the product ever actually needs
-per-teacher or per-institute separation (e.g. a tuition wants teachers walled off from each
-other, or an admin/owner role needs to see across teachers), add it back:
-1. Re-add `classes.teacher_id` (FK to `teachers`, `NOT NULL`) — or, for real co-teaching
-   support, a `class_teachers` join table instead of a single owner column.
-2. Re-add the ownership check each route lost (`_ensure_own_class`-style: fetch, compare,
-   return `CLASS_NOT_FOUND` on mismatch rather than `FORBIDDEN`, so existence isn't leaked)
-   and scope `list_all`/roster/test/result queries by it again.
+**Who can do what:**
+- **Admin-only:** `POST /api/accounts/teachers`, `POST /api/accounts/students/bulk`,
+  `POST /api/classes/` (create), `POST/DELETE /api/classes/{id}/teachers/{teacher_id}`
+  (assign/unassign). Admin bypasses class-assignment scoping entirely — not assigned to
+  specific classes themselves, they act across all of them.
+- **Teacher (assigned classes only):** `GET /api/classes/` (their own classes only —
+  `ClassRepository.list_assigned_classes`, not `list_all`), `GET /{id}`,
+  `GET /{id}/enrollments`, `PATCH/DELETE .../enrollments/{student_id}` (roster
+  management — day-to-day, not account creation). Accessing a class they're not assigned
+  to returns `CLASS_NOT_FOUND`, not `FORBIDDEN` — same "don't reveal existence" pattern
+  used everywhere else in this API.
+- **Bootstrap:** the very first account is seeded as `role = 'admin'` directly
+  (`seed.sql`), same pattern as before — account creation always requires an
+  already-logged-in admin, so the first one can't come through the API.
 
-The underlying Teacher/Class/Student shape is unchanged either way — this was a deliberate,
-scoped simplification (same pattern as dropping `roll_number` in `database-design.md` §
-Design Decisions), not a design dead end.
+**This is still not a one-way door.** If the product later needs finer-grained
+distinctions (e.g. an admin scoped to one institute among several), the underlying
+Teacher/Class/Student shape doesn't change — only the role enum and the assignment
+table would need to grow.
 
 ## Student Account Creation — Locked: Teacher-Issued, No Self-Registration
 
-**Decided:** the teacher uploads their class list (name + contact per student — a bulk
-list, not one-by-one manual add), via `POST /api/accounts/students/bulk`, and the system
-creates each student account and issues its own credentials — every new student gets the
-same system-wide default password (`DEFAULT_STUDENT_PASSWORD`, env-configured, not
-per-student), which they're expected to change via `PATCH /api/auth/password` after their
-first login. No student self-registration route exists. Fits a tuition where the teacher
-already has the full class list, and a shared default is simpler to build and hand out
-than generating/tracking a unique password per student. Roster management (add/remove/edit,
-matching a student to a `class_enrollments` row) stays with the teacher throughout.
+**Decided:** the teacher uploads their class list (name, date of birth, and contact per
+student — a bulk list, not one-by-one manual add), via `POST /api/accounts/students/bulk`,
+and the system creates each student account with a **default password derived from their
+own date of birth** (`DDMMYYYY`, e.g. `03052010`), which they're expected to change via
+`PATCH /api/auth/password` after their first login. `date_of_birth` is a required field on
+every student, alongside the existing "at least one of email/phone" requirement.
+
+This is deliberately *not* a randomly-generated password returned through the API —
+returning a plaintext secret in an API response is its own exposure risk (server access
+logs, browser dev tools, saved request-history tooling like Postman). A DOB-derived
+default needs no secret to ever be generated, stored temporarily, or transmitted through
+any system at all — the student already knows their own birthday, so the "credential" is
+never in transit anywhere. The tradeoff: a birthdate is guessable by someone who knows
+the student personally (a classmate, sibling), not a cryptographically strong secret —
+acceptable here specifically because the mandatory post-first-login password change
+closes that window quickly, and the data behind it (quiz weak-areas) isn't high-stakes.
+No student self-registration route exists. Creating/enrolling a student is admin-only
+(§ Tenancy Model); day-to-day roster management (remove/transfer within a class) stays
+with a teacher assigned to that class.
+
+**Matching an existing student never resets their password or date of birth.** If an
+entry in the bulk list matches an already-existing account (by email/phone — e.g. the
+same student being added to a second class), that account's real password and stored
+`date_of_birth` are both left untouched.
 
 This resolves the "Option 1 vs Option 2" question from the earlier draft of this section
-in favor of Option 1 (teacher/admin creates accounts) — Option 2 (student self-registers,
-then joins via a code) isn't being built.
+in favor of Option 1 (admin creates accounts) — Option 2 (student self-registers, then
+joins via a code) isn't being built.
 
-## Teacher Account Creation — Locked: Separate Endpoint, No Self-Service
+## Teacher Account Creation — Locked: Admin-Only, Separate Endpoint
 
-**Decided:** there's no self-registration route for teachers either — **an existing
-teacher creates other teacher accounts**, but through its own endpoint
-(`POST /api/accounts/teachers`), separate from student creation rather than one shared
-mechanism with a `role` field. A new teacher account is a rare, one-at-a-time addition
-(unlike a 30-row class roster), so the creating teacher supplies that new teacher's
-password directly in the request — no default-password mechanism needed there. No
-admin/owner role needed — that dependency from the earlier draft of this section is
-resolved by not needing an admin role in the first place.
+**Decided:** there's no self-registration route for teachers either — **an admin creates
+teacher accounts**, through its own endpoint (`POST /api/accounts/teachers`), separate
+from student creation rather than one shared mechanism with a `role` field in the
+request. A new teacher account is a rare, one-at-a-time addition (unlike a 30-row class
+roster), so the admin supplies that new teacher's password directly in the request — no
+default-password mechanism needed there. New accounts created this way are always plain
+`role = 'teacher'` — there's no way to create another admin through the API at all,
+matching the bootstrap-only pattern below.
 
 **Bootstrap:** since account creation always requires an already-existing, already-logged-in
-teacher, the very first teacher account can't come through this mechanism — it has to be
-seeded directly (a one-time DB seed/fixture at setup, not an API route), same pattern as
-seeded admin accounts in other systems. Every teacher after that first one is created by
-an existing teacher.
+admin, the very first account can't come through this mechanism — it has to be seeded
+directly as `role = 'admin'` (a one-time DB seed/fixture at setup, not an API route).
+Every teacher after that is created by an admin; every admin after that first one would
+need its own deliberate mechanism, not built now since there's no stated need for more
+than one.
 
 ## Student Identification on Upload
 
