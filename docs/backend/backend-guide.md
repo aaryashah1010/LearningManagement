@@ -12,9 +12,12 @@
 
 FastAPI (async) · `mysql-connector-python` (async pool) or `SQLAlchemy Core` (no ORM —
 see `database-design.md`, the schema is hand-written, not ORM-generated) · Pydantic v2
-(request/response models + settings) · `python-jose` (JWT) · `passlib[bcrypt]` ·
-`structlog` or stdlib `logging` · `slowapi` (rate limiting) · pytest + `pytest-asyncio` +
-`testcontainers` · Docker Compose (app + MySQL 8 + any provider stubs for tests).
+(request/response models + settings) · `python-jose` (JWT) · `bcrypt` (password hashing —
+not `passlib[bcrypt]`, which is unmaintained and incompatible with current `bcrypt`
+releases) ·
+stdlib `logging` (rotating file handlers, gzip on rotate — see `app/utils/logger.py`) · `slowapi` (rate
+limiting) · pytest + `pytest-asyncio` + `testcontainers` · Docker Compose (app + MySQL 8
++ any provider stubs for tests).
 
 ---
 
@@ -24,7 +27,7 @@ see `database-design.md`, the schema is hand-written, not ORM-generated) · Pyda
 app/
 ├── main.py                                 # Bootstrap: middleware → routers → exception handlers
 ├── config/
-│   └── settings.py                         # Pydantic Settings — ALL env reads (DB_*, JWT_*, LLM_PROVIDER, EMBEDDING_PROVIDER, S3_*)
+│   └── settings.py                         # Pydantic Settings — ALL env reads (DB_*, JWT_*, LLM_PROVIDER, S3_*)
 ├── database/
 │   ├── pool.py                             # Single MySQL connection pool (row-level tenancy — no per-tenant split)
 │   ├── schema.sql                          # Full DDL — database-design.md §5 is the source of truth
@@ -74,10 +77,9 @@ app/
 └── utils/
     ├── errors.py                           # AppError + ERRORS catalog (§5 of backend-architecture.md)
     ├── responses.py                        # success_response / error_response
-    ├── logger.py                           # get_logger(name)
+    ├── logger.py                           # get_logger(label) — daily-rotated, gzipped file logs + console, one shared handler set for the whole process (ported from this team's Node/Winston logging pattern)
     ├── jwt.py                              # create_auth_token / create_refresh_token / decoders
-    ├── result.py                           # Result[T, E] — see § The Result Pattern below
-    └── cosine.py                           # brute-force cosine similarity over a small in-memory row set
+    └── result.py                           # Result[T, E] — see § The Result Pattern below
 ```
 
 Root: `Dockerfile`, `docker-compose.yml` (services `mysql`, `backend`), `.env.example`, `pyproject.toml`, `pytest.ini`.
@@ -117,15 +119,19 @@ def err(error: E) -> Err[E]: return Err(error)
 ### Rules
 1. **Repositories** always return `Result[T, AppError]`.
 2. **Services** (LLM/CV/storage) always return `Result[T, AppError]`.
-3. **Routers** are the only place that unwraps a `Result` into an HTTP response — match on `is_ok()`/`is_err()`, never let a repository/service's `Err` silently become a 500 with no context.
+3. **Routers** are the only place that unwraps a `Result` into an HTTP response — match on `is_ok()`/`is_err()` and return `error_response()`/`success_response()` directly. **Never raise** for a Result-derived error — the one exception is the auth `Depends()` boundary, which structurally can't return past its own failure (see §10).
 4. **Never `raise`** inside a repository or service, except a `try/except` that immediately converts to `err(...)`.
 5. Propagate errors up unchanged: `result = await SomeRepository.find_by_id(id); if result.is_err(): return err(result.error)`.
 
 ```python
 # In a router:
-result = await get_test_controller(test_id)
+from fastapi.responses import JSONResponse
+from app.utils.responses import error_response, success_response
+
+result = await TestRepository.find_by_id(test_id)
 if result.is_err():
-    raise app_error_to_http_exception(result.error)
+    error = result.error
+    return JSONResponse(status_code=error.status_code, content=error_response(error.message, error.code))
 return success_response(result.value)
 ```
 
@@ -143,26 +149,45 @@ class AppError(Exception):
         self.status_code = status_code
         super().__init__(message)
 
-ERRORS = {
-    # Common (1xxxx)
-    "DATABASE_ERROR": AppError("Database operation failed", 10001, 500),
-    "VALIDATION_ERROR": AppError("Validation failed", 10002, 422),
-    "RESOURCE_NOT_FOUND": AppError("Resource not found", 10003, 404),
+#
+# Error Code Domains
+# ──────────────────
+# 1xxxx  Common / General
+# 2xxxx  Authentication & Authorization
+# 3xxxx  Classes / Roster
+# 4xxxx  Subjects / Books / Curriculum Taxonomy
+# 5xxxx  Tests / Questions
+# 6xxxx  Submissions / Grading
+# 7xxxx  Reports
+# 8xxxx  Files / Storage
+# 9xxxx  External Services (CV / OCR / AI)
+#
+ERRORS: dict[str, AppError] = {
+    # ─── Common (1xxxx) ──────────────────────────────────────────────
+    "DATABASE_ERROR":     AppError("Database operation failed", 10001, 500),
+    "VALIDATION_ERROR":   AppError("Validation failed",         10002, 422),
+    "RESOURCE_NOT_FOUND": AppError("Resource not found",        10003, 404),
 
-    # Auth (2xxxx)
-    "NO_TOKEN_PROVIDED": AppError("No authentication token provided", 20001, 401),
-    "INVALID_AUTH_TOKEN": AppError("Invalid authentication token", 20002, 401),
-    "TOKEN_EXPIRED": AppError("Authentication token has expired", 20003, 401),
+    # ─── Auth (2xxxx) ────────────────────────────────────────────────
+    "NO_TOKEN_PROVIDED":  AppError("No authentication token provided", 20001, 401),
+    "INVALID_AUTH_TOKEN": AppError("Invalid authentication token",     20002, 401),
+    "TOKEN_EXPIRED":      AppError("Authentication token has expired", 20003, 401),
 
-    # Domain-specific ranges (3xxxx–9xxxx) — see backend-architecture.md §5
-    # for the full catalog (Classes/Roster, Books/Ingestion, Tests/Questions,
-    # Submissions/Grading, Reports, Storage, External Services).
+    # Domain-specific ranges (3xxxx–9xxxx) — see backend-architecture.md §6
+    # for the full catalog (Classes/Roster, Books/Curriculum Taxonomy,
+    # Tests/Questions, Submissions/Grading, Reports, Storage, External Services).
 }
+
+
+def handle_unknown_error(error: Exception) -> AppError:
+    if isinstance(error, AppError):
+        return error
+    return ERRORS["UNHANDLED_ERROR"]
 ```
 
-**Rules** — identical spirit to the Node guide:
-- Every error is pre-defined in `ERRORS`, referenced by key — never construct `AppError(...)` inline in a router/repository/service.
-- `backend-architecture.md` §5 is the single source of truth for the full catalog; this file just holds the mechanism.
+**Rules:**
+- Every error is pre-defined in `ERRORS`, referenced by key — never construct `AppError(...)` inline in a router/repository/service, and never write a bare integer error code at a call site.
+- `backend-architecture.md` §6 is the single source of truth for the full catalog; this file just holds the mechanism.
 
 ---
 
@@ -171,14 +196,35 @@ ERRORS = {
 **File:** `app/utils/responses.py` — always use these, never hand-build a response dict.
 
 ```python
-def success_response(data, message: str = "Success") -> dict:
-    return {"success": True, "message": message, "data": data}
+from datetime import datetime, timezone
 
-def error_response(error: AppError) -> dict:
-    return {"success": False, "message": error.message, "code": error.code}
+def success_response(data, message: str | None = None) -> dict:
+    return {
+        "success": True,
+        "message": message or "Operation successful",
+        "data": data,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+def error_response(message: str, code: int = 10000) -> dict:
+    return {
+        "success": False,
+        "error": {"code": code, "message": message},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+def error_response_from(error: AppError) -> dict:
+    """Convenience — the code always comes from the AppError, never typed by hand."""
+    return error_response(error.message, error.code)
 ```
 
-Registered globally as a FastAPI exception handler for `AppError`, so a router that raises `app_error_to_http_exception(result.error)` always produces the same shape without repeating boilerplate per-route.
+If `data` is a `Paginated[T]`, `success_response` unwraps it into top-level `data`/`pagination` keys rather than nesting the whole `Paginated` object — see `utils/responses.py`'s pagination handling for the exact check.
+
+**Routers call these directly and return the result — they never raise for a
+Result-derived error** (§10 has the full pattern and the one exception: the auth
+`Depends()` boundary, which raises via `app_error_to_http_exception` — itself built from
+`error_response_from`, so the JSON shape is identical whether an error came from a raise
+or an explicit return).
 
 ---
 
@@ -391,10 +437,13 @@ entered, no AI-written summaries) to send directly in one prompt. See
 
 ```python
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+
 from app.middleware.auth import get_current_teacher
 from app.repositories.class_repository import ClassRepository
-from app.utils.responses import success_response
-from app.utils.errors import app_error_to_http_exception
+from app.types.token import TokenData
+from app.utils.errors import ERRORS
+from app.utils.responses import error_response, success_response
 
 router = APIRouter(prefix="/api/classes", tags=["classes"])
 
@@ -402,17 +451,19 @@ router = APIRouter(prefix="/api/classes", tags=["classes"])
 async def get_class(class_id: int, teacher: TokenData = Depends(get_current_teacher)):
     result = await ClassRepository.find_by_id(class_id)
     if result.is_err():
-        raise app_error_to_http_exception(result.error)
+        error = result.error
+        return JSONResponse(status_code=error.status_code, content=error_response(error.message, error.code))
     class_ = result.value
     if class_.teacher_id != teacher.id:
-        raise app_error_to_http_exception(ERRORS["CLASS_NOT_FOUND"])  # don't reveal another teacher's class exists
+        error = ERRORS["CLASS_NOT_FOUND"]  # don't reveal another teacher's class exists
+        return JSONResponse(status_code=error.status_code, content=error_response(error.message, error.code))
     return success_response(class_)
 ```
 
 ### Router rules
-- Auth/role checks are FastAPI **dependencies** (`Depends(get_current_teacher)`, `Depends(require_own_class)`), not manual `if` checks scattered per-route — same intent as the Node guide's middleware chain (`authenticate → requireX → validateRequest → handler`), expressed as FastAPI's own dependency system.
-- A router unwraps `Result`s from repositories/services and converts `Err` to an HTTP exception via one shared helper (`app_error_to_http_exception`) — never hand-rolls a `raise HTTPException(...)` with an inline status code.
-- Request/response bodies are Pydantic models — FastAPI validates them automatically; no separate manual validation step is needed (this replaces the Node guide's Zod `validate-request` middleware).
+- Auth/role checks are FastAPI **dependencies** (`Depends(get_current_teacher)`, `Depends(require_own_class)`), not manual `if` checks scattered per-route — same intent as the Node guide's middleware chain (`authenticate → requireX → validateRequest → handler`), expressed as FastAPI's own dependency system. This is the *one* place the app is allowed to raise (`Depends()` can only short-circuit by raising — there's no way for a dependency to "return" an error the way a route body can), and even there it raises via `app_error_to_http_exception` (`utils/responses.py`), which builds its body from the same `error_response()` helper, so the JSON shape is identical either way.
+- **Routers never raise for a Result-derived error.** Match on `is_err()` and return a `JSONResponse` built from `error_response()`/`success_response()` directly — never `raise HTTPException(...)`, and never hand-build the response dict inline. The error `code` always comes from an `ERRORS[...]` entry, never typed by hand at the call site.
+- Request/response bodies are Pydantic models — FastAPI validates them automatically; no separate manual validation step is needed (this replaces the Node guide's Zod `validate-request` middleware). A validation failure still surfaces through `error_response()` — see the `RequestValidationError` handler in `middleware/error_handlers.py`, which exists as a safety net, not something routers call into directly.
 
 ---
 

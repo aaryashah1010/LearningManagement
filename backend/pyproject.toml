@@ -1,0 +1,48 @@
+[project]
+name = "learning-management-backend"
+version = "0.1.0"
+description = "Learning Management backend — MCQ/OMR grading, curriculum taxonomy, reports"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "mysql-connector-python>=9.1",
+    "python-jose[cryptography]>=3.3",
+    "bcrypt>=4.2",
+    "slowapi>=0.1.9",
+    "python-multipart>=0.0.12",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "testcontainers[mysql]>=4.8",
+    "httpx>=0.27",
+    "ruff>=0.16.3",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]  # pyflakes, pycodestyle, isort, pyupgrade, bugbear
+ignore = [
+    "UP046",  # PEP 695 generic class syntax — skip on Pydantic BaseModel subclasses
+    "UP047",  # (Paginated, LoginResponse); Generic[T] is still the safer, proven pattern there
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# B008 (no function calls in defaults) is a real footgun in general, but Depends(...)
+# as a default is FastAPI's documented, required dependency-injection pattern — not
+# a bug. Allowlisted instead of disabling B008 entirely.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Header", "fastapi.Query"]
+
+[tool.ruff.format]
+quote-style = "double"
