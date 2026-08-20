@@ -23,8 +23,11 @@ class Settings(BaseSettings):
     JWT_AUTH_TOKEN_EXPIRE_MINUTES: int = 60
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
-    LLM_PROVIDER: Literal["anthropic", "openai", "gemini"]
+    LLM_PROVIDER: Literal["nvidia", "anthropic", "openai", "gemini"]
     LLM_API_KEY: str
+    LLM_MODEL: str = "openai/gpt-oss-20b"
+    # Only needed for OpenAI-compatible providers with a non-default endpoint (NVIDIA, Gemini).
+    LLM_BASE_URL: str | None = None
 
     CV_OCR_PROVIDER: Literal["opencv"] = "opencv"
 

@@ -26,7 +26,10 @@ class ITestRepository(Protocol):
         self, test_id: int, questions: list[CreateQuestionData]
     ) -> Result[list[Question], AppError]: ...
     def list_questions(self, test_id: int) -> Result[list[Question], AppError]: ...
+    def find_question(self, question_id: int) -> Result[Question, AppError]: ...
     def publish(self, test_id: int) -> Result[None, AppError]: ...
+    def set_node_mapping(self, question_id: int, node_id: int) -> Result[None, AppError]: ...
+    def get_node_mapping_for_test(self, test_id: int) -> Result[dict[int, int], AppError]: ...
 
 
 class TestRepositoryImpl(ITestRepository):
@@ -104,6 +107,16 @@ class TestRepositoryImpl(ITestRepository):
             logger.exception("Error listing questions")
             return err(ERRORS["DATABASE_ERROR"])
 
+    def find_question(self, question_id: int) -> Result[Question, AppError]:
+        try:
+            row = fetch_one("SELECT * FROM questions WHERE id = %s", (question_id,))
+            if row is None:
+                return err(ERRORS["QUESTION_NOT_FOUND"])
+            return ok(Question(**row))
+        except Exception:
+            logger.exception("Error finding question by id")
+            return err(ERRORS["DATABASE_ERROR"])
+
     def publish(self, test_id: int) -> Result[None, AppError]:
         try:
             execute(
@@ -113,6 +126,34 @@ class TestRepositoryImpl(ITestRepository):
             return ok(None)
         except Exception:
             logger.exception("Error publishing test")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def set_node_mapping(self, question_id: int, node_id: int) -> Result[None, AppError]:
+        try:
+            with transaction() as conn:
+                cursor = conn.cursor()
+                # Replace, not append — v1 maps each question to exactly one node, even
+                # though the schema allows more (see database-design.md § Design Decisions).
+                cursor.execute("DELETE FROM question_node_map WHERE question_id = %s", (question_id,))
+                cursor.execute(
+                    "INSERT INTO question_node_map (question_id, node_id) VALUES (%s, %s)",
+                    (question_id, node_id),
+                )
+            return ok(None)
+        except Exception:
+            logger.exception("Error setting question node mapping")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def get_node_mapping_for_test(self, test_id: int) -> Result[dict[int, int], AppError]:
+        try:
+            rows = fetch_all(
+                "SELECT qnm.question_id, qnm.node_id FROM question_node_map qnm "
+                "JOIN questions q ON q.id = qnm.question_id WHERE q.test_id = %s",
+                (test_id,),
+            )
+            return ok({r["question_id"]: r["node_id"] for r in rows})
+        except Exception:
+            logger.exception("Error fetching node mapping for test")
             return err(ERRORS["DATABASE_ERROR"])
 
 

@@ -36,3 +36,7 @@ class BulkQuestionsRequest(BaseModel):
         if len(numbers) != len(set(numbers)):
             raise ValueError("question_number must be unique within the batch")
         return self
+
+
+class SetQuestionNodeRequest(BaseModel):
+    node_id: int
