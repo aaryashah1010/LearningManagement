@@ -17,8 +17,8 @@
 **Python + FastAPI**, single backend, no service split. Resolved this way after weighing
 it directly (see conversation history / team discussion):
 
-- Nearly every core feature here is CV/AI/ML-shaped — OMR answer extraction (OpenCV
-  and/or AI-vision, method left open per `../omr-grading.md`, current version),
+- Nearly every core feature here is CV/AI/ML-shaped — OMR answer extraction (pure
+  OpenCV against a single fixed sheet template, see `omr-extraction-strategy.md`),
   handwriting OCR (deferred), and LLM calls at a couple of pipeline stages. That's the
   majority of the product, not one isolable slice of an
   otherwise generic CRUD app — so keeping it in one language avoids constant
@@ -31,8 +31,8 @@ it directly (see conversation history / team discussion):
   templating/admin/forms.
 - **Every AI/CV/storage provider sits behind an interface** (`backend-guide.md`
   § Service Layer & Provider Abstraction) — swapping Claude for GPT, or the in-house
-  OpenCV/OCR module for a hosted vendor, is a one-file change with zero changes to any
-  router or pipeline code that calls it.
+  OpenCV bubble-reading module for a different extraction method entirely, is a one-file
+  change with zero changes to any router or pipeline code that calls it.
 
 ---
 
@@ -42,8 +42,8 @@ FastAPI (async) · `mysql-connector-python`/`SQLAlchemy Core` · Pydantic v2 ·
 `python-jose` (JWT) · `bcrypt` (password hashing) · stdlib `logging` (rotating file
 handlers, gzip on rotate — see `app/utils/logger.py`) · `slowapi` (rate limiting) ·
 pytest + `pytest-asyncio` + `testcontainers` · Docker Compose (app + MySQL 8) ·
-OpenCV (`opencv-python`) + an OCR library, used directly inside `cv_ocr_service.py` —
-no separate microservice (see § 0 above).
+OpenCV (`opencv-python`), used directly inside `cv_ocr_service.py` — no separate
+microservice (see § 0 above).
 
 ---
 
@@ -256,13 +256,13 @@ POST /tests/{test_id}/submissions  (student, own login — the only path in v1)
         │  no QR/roll-number/matching needed (../accounts-and-roster.md)
         ▼
   cv_ocr_service.detect_bubbles()  (§5 — in-process, behind ICvOcrService;
-        │                            v1 = one AI-vision read per sheet, no
-        │                            caching — omr-extraction-strategy.md)
+        │                            v2 = pure OpenCV against one fixed sheet
+        │                            template, no AI — omr-extraction-strategy.md)
         ▼
   compare to questions.correct_option (plain comparison, no AI)
         │
         ▼
-  low-confidence bubble read?  →  answers.needs_review = true  →  PUT /submissions/{id}/answers/{q_id} (teacher confirms)
+  ambiguous/failed bubble read?  →  answers.needs_review = true  →  PUT /submissions/{id}/answers/{q_id} (teacher confirms)
         │
         ▼
   answers rows written — reference question_id only, never write to curriculum_nodes
@@ -310,7 +310,7 @@ unnecessary once the taxonomy is small and unsummarized.
 
 | Service | Interface | Swappable providers | Notes |
 |---|---|---|---|
-| `cv_ocr_service.py` | `ICvOcrService` | **v1:** one AI-vision call reads every sheet directly, no caching, no registration — chosen over a cached-template/CV-first design specifically to avoid unvalidated registration risk before real usage justifies the added complexity; see `omr-extraction-strategy.md` for the reasoning and the deferred cached-template design | `detect_bubbles()` only — stateless, image in, structured result (answers + per-question confidence flags) out. No handwriting/OCR method on the interface at all; added when subjective grading is actually built, as its own PR. **Cost note:** a real per-submission AI cost, not free-CV — small and bounded at typical class sizes, but not zero; see `omr-extraction-strategy.md` § What still needs deciding for the open cost-at-scale question |
+| `cv_ocr_service.py` | `ICvOcrService` | **v2:** pure OpenCV against one fixed, project-owned sheet template (corner fiducial markers → deskew → fixed bubble positions → fill-ratio read), no AI, no per-sheet cost — viable specifically because the sheet layout is fixed and known in advance, not arbitrary; see `omr-extraction-strategy.md` for the full reasoning | `detect_bubbles()` only — stateless, image in, structured result (answers + per-question `needs_review` flags) out. No handwriting/OCR method on the interface at all; added when subjective grading is actually built, as its own PR |
 | `llm_service.py` | `ILlmService` | Anthropic (Claude), OpenAI (GPT), etc. | Three calls across the pipelines (§4b, §4c fallback, §4d) — question-mapping is given one subject's whole taxonomy directly (small enough, no shortlisting needed), never a whole book's raw text. No PDF-parsing service — taxonomy authoring is offline/developer-driven, not an app-level AI call (§4a) |
 | `storage_service.py` | `IStorageService` | S3-compatible object storage | DB stores keys/pointers, never file bytes — `ncert_books.pdf_url`, `submissions.image_url` (`database-design.md` §4) |
 
@@ -354,7 +354,7 @@ See `backend-guide.md` §11 for the mechanics. Priority scenarios per layer:
 1. **Skeleton** — settings, utils (`errors`/`responses`/`logger`/`jwt`/`result`), middleware, DB pool, `main.py`, Docker
 2. **Auth + Classes/Roster** — teacher/student login, class CRUD, enrollments (unlocks everything scoped to a class)
 3. **Subjects + Curriculum Taxonomy** — developer-seeded directly in the DB (read-only via the API); needed before any test can be set up in a subject
-4. **cv_ocr_service** — AI-vision bubble reading (§5, `omr-extraction-strategy.md`); handwriting OCR deferred
+4. **cv_ocr_service** — pure OpenCV bubble reading against the fixed sheet template (§5, `omr-extraction-strategy.md`); handwriting OCR deferred
 5. **Tests + Questions** — Path A/B setup, whole-taxonomy question mapping + AI pick, publish lock
 6. **Submissions** — upload (login-only identification, v1), MCQ grading (mechanical), confidence flagging/review. Subjective grading deferred.
 7. **Reports** — rollup query, evidence filtering, LLM phrasing — both per-student and class-wide

@@ -13,6 +13,8 @@ dependencies = [
     "bcrypt>=4.2",
     "slowapi>=0.1.9",
     "python-multipart>=0.0.12",
+    "opencv-python-headless>=4.10",
+    "numpy>=2.0",
 ]
 
 [dependency-groups]

@@ -65,6 +65,7 @@ ERRORS: dict[str, AppError] = {
     "CV_OCR_ERROR": AppError("Bubble detection failed", 90001, 502),
     "LLM_SERVICE_ERROR": AppError("AI service call failed", 90002, 502),
     "LOW_CONFIDENCE_EXTRACTION": AppError("Extraction confidence too low", 90003, 422),
+    "IMAGE_TOO_BLURRY": AppError("Image is too blurry to read, please retake the photo", 90004, 422),
 }
 
 

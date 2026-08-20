@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     LLM_PROVIDER: Literal["anthropic", "openai", "gemini"]
     LLM_API_KEY: str
 
+    CV_OCR_PROVIDER: Literal["opencv"] = "opencv"
+
     # Object storage
     S3_BUCKET: str
     S3_REGION: str
