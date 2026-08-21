@@ -17,24 +17,34 @@ function ClassCardSkeleton() {
   );
 }
 
-export function ClassesGrid() {
+interface ClassesGridProps {
+  // Only admins can create classes (POST /api/classes/ is admin-only) — the
+  // teacher view of this same grid hides the form instead of showing a
+  // control that would just 403.
+  canCreate?: boolean;
+  basePath: string;
+}
+
+export function ClassesGrid({ canCreate = true, basePath }: ClassesGridProps) {
   const { classes, hasMore, isLoading } = useClasses();
   const { name, setName, showForm, setShowForm, error, justCreated, isCreating, handleSubmit } =
     useCreateClassForm();
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="max-w-xl text-sm text-ink/60 dark:text-paper/60">
-          Create a class, then manage its roster from its detail page.
-        </p>
-        <Button onClick={() => setShowForm(!showForm)} className="shrink-0">
-          <PlusIcon className={`h-4 w-4 transition-transform duration-200 ${showForm ? "rotate-45" : ""}`} />
-          {showForm ? "Cancel" : "Create class"}
-        </Button>
-      </div>
+      {canCreate && (
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="max-w-xl text-sm text-ink/60 dark:text-paper/60">
+            Create a class, then manage its roster from its detail page.
+          </p>
+          <Button onClick={() => setShowForm(!showForm)} className="shrink-0">
+            <PlusIcon className={`h-4 w-4 transition-transform duration-200 ${showForm ? "rotate-45" : ""}`} />
+            {showForm ? "Cancel" : "Create class"}
+          </Button>
+        </div>
+      )}
 
-      {justCreated && !showForm && (
+      {canCreate && justCreated && !showForm && (
         <div className="flex items-center gap-3 rounded-xl border border-chart-green/30 bg-chart-green/[0.06] px-4 py-3 text-sm text-ink dark:text-paper">
           <CheckIcon className="h-4 w-4 shrink-0 text-chart-green" />
           <span>
@@ -43,7 +53,7 @@ export function ClassesGrid() {
         </div>
       )}
 
-      {showForm && (
+      {canCreate && showForm && (
         <form
           onSubmit={handleSubmit}
           className="flex max-w-lg flex-col gap-6 rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate"
@@ -71,14 +81,16 @@ export function ClassesGrid() {
           ))}
         </div>
       ) : classes.length === 0 ? (
-        <p className="text-sm text-ink/50 dark:text-paper/50">No classes yet — create the first one above.</p>
+        <p className="text-sm text-ink/50 dark:text-paper/50">
+          {canCreate ? "No classes yet — create the first one above." : "No classes assigned to you yet."}
+        </p>
       ) : (
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {classes.map((c) => (
               <Link
                 key={c.id}
-                href={`/admin/classes/${c.id}`}
+                href={`${basePath}/${c.id}`}
                 className="flex flex-col gap-2 rounded-2xl border border-ink/10 bg-paper p-5 transition-colors hover:border-correct/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-correct focus-visible:ring-offset-2 focus-visible:ring-offset-paper dark:border-paper/10 dark:bg-slate dark:focus-visible:ring-offset-slate"
               >
                 <p className="font-display text-lg text-ink dark:text-paper">{c.name}</p>

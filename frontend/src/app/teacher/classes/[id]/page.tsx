@@ -4,7 +4,7 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
-export default async function AdminClassDetailPage({ params }: PageProps) {
+export default async function TeacherClassDetailPage({ params }: PageProps) {
   const { id } = await params;
-  return <ClassDetailView classId={Number(id)} basePath="/admin/classes" />;
+  return <ClassDetailView classId={Number(id)} basePath="/teacher/classes" />;
 }

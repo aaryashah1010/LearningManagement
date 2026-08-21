@@ -3,10 +3,11 @@ import { createTeacher, fetchTeachers } from "../services";
 
 const LIST_LIMIT = 100;
 
-export function useTeachers() {
+export function useTeachers(enabled = true) {
   const { data, error, isLoading } = useQuery({
     queryKey: ["teachers"],
     queryFn: () => fetchTeachers(null, LIST_LIMIT),
+    enabled,
   });
   return {
     teachers: data?.data ?? [],

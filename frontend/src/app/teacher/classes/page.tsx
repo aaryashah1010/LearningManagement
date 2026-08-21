@@ -1,5 +1,8 @@
-import { NotImplemented } from "@/components/layout/not-implemented";
+import type { Metadata } from "next";
+import { ClassesGrid } from "@/features/classes/component/classes-grid";
+
+export const metadata: Metadata = { title: "Classes" };
 
 export default function TeacherClassesPage() {
-  return <NotImplemented label="Classes" />;
+  return <ClassesGrid canCreate={false} basePath="/teacher/classes" />;
 }

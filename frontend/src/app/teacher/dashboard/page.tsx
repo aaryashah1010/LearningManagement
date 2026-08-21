@@ -1,5 +1,8 @@
-import { NotImplemented } from "@/components/layout/not-implemented";
+import type { Metadata } from "next";
+import { TeacherDashboardOverview } from "./dashboard-overview";
+
+export const metadata: Metadata = { title: "Teacher dashboard" };
 
 export default function TeacherDashboardPage() {
-  return <NotImplemented label="Dashboard" />;
+  return <TeacherDashboardOverview />;
 }

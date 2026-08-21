@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { XIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/features/auth/hooks/useAuth";
 import { useTeachers } from "@/features/teachers/hooks";
 import { formatDate } from "@/lib/format-date";
 import {
@@ -22,8 +23,13 @@ function RosterRowSkeleton() {
 }
 
 function TeacherCard({ classId }: { classId: number }) {
+  const { user } = useAuth();
+  // Assign/unassign (POST|DELETE /api/classes/{id}/teachers) are admin-only
+  // — a teacher viewing their own class sees this card read-only.
+  const canManage = user?.role === "admin";
+
   const { teachers: assigned, isLoading } = useClassTeachers(classId);
-  const { teachers: allTeachers } = useTeachers();
+  const { teachers: allTeachers } = useTeachers(canManage);
   const { assignTeacher, isAssigning } = useAssignTeacher(classId);
   const { unassignTeacher, isUnassigning } = useUnassignTeacher(classId);
   const [showAssign, setShowAssign] = useState(false);
@@ -57,19 +63,21 @@ function TeacherCard({ classId }: { classId: number }) {
                 <p className="font-medium text-ink dark:text-paper">{teacher.name}</p>
                 <p className="text-sm text-ink/55 dark:text-paper/55">{teacher.email}</p>
               </div>
-              <Button
-                variant="ghost"
-                onClick={() => unassignTeacher(teacher.id)}
-                disabled={isUnassigning}
-              >
-                Unassign
-              </Button>
+              {canManage && (
+                <Button
+                  variant="ghost"
+                  onClick={() => unassignTeacher(teacher.id)}
+                  disabled={isUnassigning}
+                >
+                  Unassign
+                </Button>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      {showAssign ? (
+      {!canManage ? null : showAssign ? (
         availableTeachers.length === 0 ? (
           <p className="text-sm text-ink/50 dark:text-paper/50">
             Every teacher is already assigned to this class.
@@ -102,7 +110,8 @@ function TeacherCard({ classId }: { classId: number }) {
   );
 }
 
-export function ClassDetailView({ classId }: { classId: number }) {
+export function ClassDetailView({ classId, basePath }: { classId: number; basePath: string }) {
+  const { user } = useAuth();
   const { classDetail, isLoading: isDetailLoading, error: detailError } = useClassDetail(classId);
   const { students, isLoading: isRosterLoading } = useClassEnrollments(classId);
   const { classes } = useClasses();
@@ -127,7 +136,7 @@ export function ClassDetailView({ classId }: { classId: number }) {
   return (
     <div className="flex flex-col gap-8">
       <Link
-        href="/admin/classes"
+        href={basePath}
         className="inline-flex w-fit items-center gap-1.5 text-sm font-medium text-ink/55 hover:text-ink dark:text-paper/55 dark:hover:text-paper"
       >
         <span aria-hidden>←</span> All classes
@@ -160,7 +169,9 @@ export function ClassDetailView({ classId }: { classId: number }) {
             </div>
           ) : students.length === 0 ? (
             <p className="mt-4 text-sm text-ink/50 dark:text-paper/50">
-              No students enrolled yet — add them from the Students page.
+              {user?.role === "admin"
+                ? "No students enrolled yet — add them from the Students page."
+                : "No students enrolled yet."}
             </p>
           ) : (
             <ul className="mt-4 flex flex-col divide-y divide-ink/8 dark:divide-paper/8">
