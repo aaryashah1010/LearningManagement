@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { EyeIcon, EyeOffIcon } from "@/components/icons";
 import { Button } from "@/components/ui/Button";
 import { FormField } from "@/components/ui/FormField";
 import { ROLE_HOME } from "@/lib/nav";
@@ -126,9 +127,15 @@ export function LoginScreen() {
                   <button
                     type="button"
                     onClick={() => setShowPassword((visible) => !visible)}
-                    className="shrink-0 font-utility text-[11px] font-medium uppercase tracking-wide text-ink/40 hover:text-ink/70"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-pressed={showPassword}
+                    className="shrink-0 rounded p-1 text-ink/40 transition-colors hover:text-ink/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-correct"
                   >
-                    {showPassword ? "Hide" : "Show"}
+                    {showPassword ? (
+                      <EyeOffIcon className="h-[18px] w-[18px]" />
+                    ) : (
+                      <EyeIcon className="h-[18px] w-[18px]" />
+                    )}
                   </button>
                 }
               />

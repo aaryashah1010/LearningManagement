@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CheckIcon, SubmissionsIcon } from "@/components/icons";
 import { Button } from "@/components/ui/Button";
+import { formatDate } from "@/lib/format-date";
 import type { MockSubmission, MockTest } from "@/lib/mock-data";
 
 export function TestAction({
@@ -25,7 +26,7 @@ export function TestAction({
         <div>
           <h2 className="font-display text-2xl text-ink dark:text-paper">{test.title}</h2>
           <p className="mt-1 text-sm text-ink/55 dark:text-paper/55">
-            Submitted {new Date(submission.submittedAt).toLocaleDateString()} ·{" "}
+            Submitted {formatDate(submission.submittedAt)} ·{" "}
             <span className="font-semibold text-chart-green">{submission.score}%</span> ·{" "}
             {correctCount}/{submission.answers.length} correct
           </p>

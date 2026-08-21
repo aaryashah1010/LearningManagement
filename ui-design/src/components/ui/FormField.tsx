@@ -51,7 +51,12 @@ export function FormField({
     const mirror = mirrorRef.current;
     if (!input || !mirror) return;
     const selectionStart = input.selectionStart ?? input.value.length;
-    mirror.textContent = input.value.slice(0, selectionStart);
+    const textBeforeCaret = input.value.slice(0, selectionStart);
+    // A masked password renders uniform-width dots, not the real letters —
+    // mirroring the actual characters would measure the wrong width and the
+    // pen would drift out of sync with the visible dots as you type.
+    mirror.textContent =
+      input.type === "password" ? "•".repeat(textBeforeCaret.length) : textBeforeCaret;
     setCaretX(mirror.getBoundingClientRect().width);
   }
 

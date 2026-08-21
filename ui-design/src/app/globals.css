@@ -31,6 +31,13 @@ body {
   color: var(--color-ink);
 }
 
+/* Edge/IE ship their own built-in password reveal + clear icons — hide them
+   so our own eye toggle is the only one, instead of showing two. */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+
 .bg-paper-rule {
   background-image: repeating-linear-gradient(
     to bottom,

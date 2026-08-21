@@ -1,14 +1,16 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ChevronIcon } from "@/components/icons";
+import { ChevronIcon, LogoutIcon } from "@/components/icons";
 import { NAV_ITEMS_BY_ROLE, ROLE_HOME, type Role } from "@/lib/nav";
 import { NavItem } from "./NavItem";
 
 const STORAGE_KEY = "tangent-sidebar-collapsed";
 
 export function Sidebar({ role }: { role: Role }) {
+  const router = useRouter();
   const navItems = NAV_ITEMS_BY_ROLE[role];
   const homeHref = ROLE_HOME[role];
   const [collapsed, setCollapsed] = useState(false);
@@ -26,6 +28,11 @@ export function Sidebar({ role }: { role: Role }) {
       localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
       return next;
     });
+  }
+
+  function handleLogout() {
+    // No backend wired yet — this just routes back to the sign-in screen.
+    router.push("/login");
   }
 
   return (
@@ -54,7 +61,20 @@ export function Sidebar({ role }: { role: Role }) {
         </nav>
       </div>
 
-      <div className="border-t border-paper/10 px-4 py-4">
+      <div className="flex flex-col gap-1 border-t border-paper/10 px-4 py-4">
+        {!collapsed && (
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-paper/55 transition-colors hover:bg-paper/10 hover:text-paper/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-correct focus-visible:ring-offset-2 focus-visible:ring-offset-ink"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center">
+              <LogoutIcon className="h-[18px] w-[18px]" />
+            </span>
+            <span>Log out</span>
+          </button>
+        )}
+
         <button
           type="button"
           onClick={toggleCollapsed}

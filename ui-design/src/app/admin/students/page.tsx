@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { AlertIcon, CheckIcon, PlusIcon, XIcon } from "@/components/icons";
+import { AlertIcon, CheckIcon, ImportIcon, PlusIcon, XIcon } from "@/components/icons";
 import { Button } from "@/components/ui/Button";
 import { MOCK_CLASSES } from "@/lib/mock-data";
 
@@ -69,11 +69,17 @@ export default function AdminStudentsPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <p className="max-w-2xl text-sm text-ink/60 dark:text-paper/60">
-        Bulk-add a class roster. Matching an existing student by email or phone
-        enrolls them into this class without touching their password or date of
-        birth.
-      </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="max-w-2xl text-sm text-ink/60 dark:text-paper/60">
+          Bulk-add a class roster. Matching an existing student by email or
+          phone enrolls them into this class without touching their password
+          or date of birth.
+        </p>
+        <Button variant="ghost" className="shrink-0">
+          <ImportIcon className="h-4 w-4" />
+          Import Excel
+        </Button>
+      </div>
 
       {!results && (
         <form onSubmit={handleSubmit} className="flex flex-col gap-6">
