@@ -1,95 +1,86 @@
 """
-Static geometry for the one fixed OMR sheet template (omr-extraction-strategy.md).
-Every number here is the same one the printed sheet was designed from — this is not
-discovered per photo, it's read once and reused for every submission.
+Static geometry for the official OMR sheet ("ATTITUDE CLASSES FOR EXCELLENCE - OMR",
+see omr-extraction-strategy.md § The template). This is a third-party sheet design,
+not one this project authored, so there's no print spec to read exact dimensions
+from — positions here are fractions of the detected outer table border, measured
+from a scanned sample sheet, not absolute mm. Still a single fixed config read once
+and reused for every submission, never discovered per photo.
 """
 
 from dataclasses import dataclass
 
-# Canonical resolution the deskewed image is warped to. 150 DPI is plenty for bubble
-# fill-ratio measurement (bubbles are ~5mm, i.e. ~30px at this scale) without the
-# memory/compute cost of a full-resolution warp.
-DPI = 150
-PX_PER_MM = DPI / 25.4
+# Canonical size the deskewed table region is warped to, matching the sampled
+# sheet's near-square table aspect ratio.
+CANON_WIDTH_PX = 1000
+CANON_HEIGHT_PX = 1007
 
-PAGE_WIDTH_MM = 210.0
-PAGE_HEIGHT_MM = 297.0
-CANON_WIDTH_PX = round(PAGE_WIDTH_MM * PX_PER_MM)
-CANON_HEIGHT_PX = round(PAGE_HEIGHT_MM * PX_PER_MM)
+# Row bands, as fractions of the table height. Above DATA_ROWS_TOP_FRAC is the
+# title row, NAME/STD row, SUB/DATE row, and A/B/C/D header row — none of that is
+# read by this pipeline (student identity comes from the app session, not OCR).
+DATA_ROWS_TOP_FRAC = 0.1312
+DATA_ROWS_BOTTOM_FRAC = 0.9657
+ROWS_PER_BLOCK = 25
+ROW_HEIGHT_FRAC = (DATA_ROWS_BOTTOM_FRAC - DATA_ROWS_TOP_FRAC) / ROWS_PER_BLOCK
 
-MARKER_SIZE_MM = 10.0
-MARKER_INSET_MM = 8.0
-
-# Marker *centers* in mm — used as the canonical target points for the homography.
-MARKER_CENTERS_MM: dict[str, tuple[float, float]] = {
-    "tl": (MARKER_INSET_MM + MARKER_SIZE_MM / 2, MARKER_INSET_MM + MARKER_SIZE_MM / 2),
-    "tr": (
-        PAGE_WIDTH_MM - MARKER_INSET_MM - MARKER_SIZE_MM / 2,
-        MARKER_INSET_MM + MARKER_SIZE_MM / 2,
-    ),
-    "bl": (
-        MARKER_INSET_MM + MARKER_SIZE_MM / 2,
-        PAGE_HEIGHT_MM - MARKER_INSET_MM - MARKER_SIZE_MM / 2,
-    ),
-    "br": (
-        PAGE_WIDTH_MM - MARKER_INSET_MM - MARKER_SIZE_MM / 2,
-        PAGE_HEIGHT_MM - MARKER_INSET_MM - MARKER_SIZE_MM / 2,
-    ),
-}
-
-GRID_TOP_MM = 58.0
-COL_HEAD_HEIGHT_MM = 6.0
-ROW_HEIGHT_MM = 8.36
-ROWS_PER_COLUMN = 25
 QUESTIONS_PER_ROW = ("A", "B", "C", "D")
 
-LEFT_COL_X_MM = 12.0
-RIGHT_COL_X_MM = 112.0
-LABEL_WIDTH_MM = 12.0
-BUBBLE_CELL_MM = 16.0
-BUBBLE_DIAMETER_MM = 5.0
+# The sheet is one table split into two equal-width blocks (Q1-25 left, Q26-50
+# right), each block laid out as 5 equal-width columns: question-number, then
+# A/B/C/D. Measured directly off the canonical warped table (not the raw scan —
+# the printed circles' own ring edges create phantom density peaks that threw off
+# an earlier measurement against the unwarped photo).
+BLOCK_WIDTH_FRAC = 0.5
+BLOCK_X_FRACS = (0.0, BLOCK_WIDTH_FRAC)
+LABEL_WIDTH_FRAC_OF_BLOCK = 0.2
+OPTION_WIDTH_FRAC_OF_BLOCK = (1 - LABEL_WIDTH_FRAC_OF_BLOCK) / len(QUESTIONS_PER_ROW)
 
 
 @dataclass(frozen=True)
 class BubblePosition:
     question_number: int
     option: str
-    center_mm: tuple[float, float]
+    center_frac: tuple[float, float]  # (x, y) as a fraction of the canonical table size
 
 
-def _bubble_x_offsets_mm() -> list[float]:
-    # Bubbles sit centered in their 16mm cell, cells start right after the label column.
-    return [LABEL_WIDTH_MM + (i + 0.5) * BUBBLE_CELL_MM for i in range(len(QUESTIONS_PER_ROW))]
+def _option_x_offsets_frac() -> list[float]:
+    # Offsets are fractions of a block's own width, not the whole table — scale by
+    # BLOCK_WIDTH_FRAC before adding to a block's starting x fraction.
+    return [
+        (LABEL_WIDTH_FRAC_OF_BLOCK + (i + 0.5) * OPTION_WIDTH_FRAC_OF_BLOCK) * BLOCK_WIDTH_FRAC
+        for i in range(len(QUESTIONS_PER_ROW))
+    ]
 
 
-def _column_bubbles(col_x_mm: float, first_question: int) -> list[BubblePosition]:
-    x_offsets = _bubble_x_offsets_mm()
-    data_top_mm = GRID_TOP_MM + COL_HEAD_HEIGHT_MM
+def _block_bubbles(block_x_frac: float, first_question: int) -> list[BubblePosition]:
+    x_offsets = _option_x_offsets_frac()
     bubbles = []
-    for row in range(ROWS_PER_COLUMN):
+    for row in range(ROWS_PER_BLOCK):
         question_number = first_question + row
-        y_mm = data_top_mm + (row + 0.5) * ROW_HEIGHT_MM
+        y_frac = DATA_ROWS_TOP_FRAC + (row + 0.5) * ROW_HEIGHT_FRAC
         for option, x_offset in zip(QUESTIONS_PER_ROW, x_offsets, strict=True):
             bubbles.append(
                 BubblePosition(
                     question_number=question_number,
                     option=option,
-                    center_mm=(col_x_mm + x_offset, y_mm),
+                    center_frac=(block_x_frac + x_offset, y_frac),
                 )
             )
     return bubbles
 
 
-# All 50 questions' bubble centers, in mm — the single source of truth for both the
-# printed sheet and the fill-reading code. Never discovered from a photo.
-TEMPLATE_BUBBLES: list[BubblePosition] = _column_bubbles(LEFT_COL_X_MM, 1) + _column_bubbles(
-    RIGHT_COL_X_MM, ROWS_PER_COLUMN + 1
+# All 50 questions' bubble centers, as fractions of the canonical table — the single
+# source of truth for the fill-reading code. Never discovered from a photo.
+TEMPLATE_BUBBLES: list[BubblePosition] = _block_bubbles(BLOCK_X_FRACS[0], 1) + _block_bubbles(
+    BLOCK_X_FRACS[1], ROWS_PER_BLOCK + 1
 )
 
 
-def mm_to_canon_px(point_mm: tuple[float, float]) -> tuple[float, float]:
-    x_mm, y_mm = point_mm
-    return (x_mm * PX_PER_MM, y_mm * PX_PER_MM)
+def frac_to_canon_px(point_frac: tuple[float, float]) -> tuple[float, float]:
+    x_frac, y_frac = point_frac
+    return (x_frac * CANON_WIDTH_PX, y_frac * CANON_HEIGHT_PX)
 
 
-BUBBLE_RADIUS_PX = round((BUBBLE_DIAMETER_MM / 2) * PX_PER_MM)
+# Sized off row height (not a printed bubble diameter, since we don't have one) —
+# large enough to comfortably sit inside a hand-drawn circle without reaching its
+# printed outline.
+BUBBLE_RADIUS_PX = round(0.35 * ROW_HEIGHT_FRAC * CANON_HEIGHT_PX)

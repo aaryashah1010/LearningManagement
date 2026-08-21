@@ -1,4 +1,3 @@
-import itertools
 from typing import Protocol
 
 import cv2
@@ -22,16 +21,11 @@ BLUR_VARIANCE_THRESHOLD = 20.0
 
 _CORNERS = ("tl", "tr", "bl", "br")
 
-# Expected span between marker centers, from the template itself — used to validate a
-# candidate corner assignment by shape, not by raw image position (see _assign_corners).
-_MARKER_SPAN_MM = template.PAGE_WIDTH_MM - 2 * (template.MARKER_INSET_MM + template.MARKER_SIZE_MM / 2)
-_MARKER_RISE_MM = template.PAGE_HEIGHT_MM - 2 * (template.MARKER_INSET_MM + template.MARKER_SIZE_MM / 2)
-_EXPECTED_ASPECT = _MARKER_SPAN_MM / _MARKER_RISE_MM
-_MAX_CANDIDATES_CONSIDERED = 12  # bounds permutation cost if noise produces extra squarish blobs
-
-
-def _distance(a: tuple[float, float], b: tuple[float, float]) -> float:
-    return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+# The outer table border must dominate the frame to be trusted as the sheet, not
+# background clutter — same idea as requiring 4 corner markers before, just applied
+# to a single border contour instead.
+_MIN_TABLE_AREA_FRACTION = 0.2
+_CANDIDATE_CONTOURS_CONSIDERED = 10
 
 
 class ICvOcrService(Protocol):
@@ -51,11 +45,11 @@ class OpenCvOcrService:
         if self._blur_score(raw) < BLUR_VARIANCE_THRESHOLD:
             return err(ERRORS["IMAGE_TOO_BLURRY"])
 
-        markers = self._detect_corner_markers(raw)
-        if markers is None:
+        corners = self._detect_table_corners(raw)
+        if corners is None:
             return err(ERRORS["CV_OCR_ERROR"])
 
-        warped = self._deskew(raw, markers)
+        warped = self._deskew(raw, corners)
         ink_mask = self._threshold_to_ink_mask(warped)
         answers = self._read_bubbles(ink_mask)
         return ok(AnswerMap(answers=answers))
@@ -63,97 +57,54 @@ class OpenCvOcrService:
     def _blur_score(self, gray: np.ndarray) -> float:
         return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
-    def _detect_corner_markers(self, gray: np.ndarray) -> dict[str, tuple[float, float]] | None:
-        """Finds squarish candidate blobs, then assigns 4 of them to tl/tr/bl/br by
-        which assignment's quadrilateral shape best matches the template's known
-        marker-span aspect ratio (see _assign_corners) — not by raw image position,
-        since perspective skew can shift a marker across the image's literal midpoint."""
-        _, ink = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
-        contours, _ = cv2.findContours(ink, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    def _detect_table_corners(self, gray: np.ndarray) -> dict[str, tuple[float, float]] | None:
+        """Finds the sheet's outer table border and returns its 4 corners — this
+        sheet has no dedicated fiducial markers (it's a third-party design), so the
+        table's own printed outline is used as the deskew reference instead, the
+        same way a generic document scanner locates a page in a photo."""
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 50, 150)
+        edges = cv2.dilate(edges, np.ones((5, 5), np.uint8))
+        contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
-        height, width = gray.shape
-        min_area = 0.0002 * width * height
-        max_area = 0.02 * width * height
+        image_area = gray.shape[0] * gray.shape[1]
+        min_area = _MIN_TABLE_AREA_FRACTION * image_area
 
-        candidates: list[tuple[float, float]] = []
-        for contour in contours:
+        for contour in contours[:_CANDIDATE_CONTOURS_CONSIDERED]:
             area = cv2.contourArea(contour)
-            if not (min_area <= area <= max_area):
-                continue
-            x, y, w, h = cv2.boundingRect(contour)
-            aspect_ratio = w / float(h)
-            if not (0.7 <= aspect_ratio <= 1.3):
-                continue
-            # 0.05: loose enough to collapse a blur/compression-roughened marker edge
-            # into a clean quad — tighter values miss real markers under blur.
+            if area < min_area:
+                break  # sorted descending — nothing smaller is worth checking either
             perimeter = cv2.arcLength(contour, closed=True)
-            approx = cv2.approxPolyDP(contour, epsilon=0.05 * perimeter, closed=True)
+            approx = cv2.approxPolyDP(contour, epsilon=0.02 * perimeter, closed=True)
             if len(approx) != 4:
                 continue
+            return self._order_corners(approx.reshape(4, 2).astype(np.float64))
 
-            moments = cv2.moments(contour)
-            if moments["m00"] == 0:
-                continue
-            candidates.append((area, (moments["m10"] / moments["m00"], moments["m01"] / moments["m00"])))
+        return None
 
-        if len(candidates) < 4:
-            return None
-        # Cap candidate count for permutation cost; largest/cleanest blobs are the most
-        # plausible real markers if more than expected squarish shapes were found.
-        candidates.sort(key=lambda c: c[0], reverse=True)
-        points = [point for _, point in candidates[:_MAX_CANDIDATES_CONSIDERED]]
+    def _order_corners(self, points: np.ndarray) -> dict[str, tuple[float, float]]:
+        """Orders 4 arbitrary quadrilateral points into tl/tr/bl/br using the
+        standard sum/diff trick: top-left has the smallest x+y, bottom-right the
+        largest; top-right has the smallest y-x, bottom-left the largest."""
+        sums = points.sum(axis=1)
+        diffs = points[:, 1] - points[:, 0]
+        return {
+            "tl": tuple(points[np.argmin(sums)]),
+            "br": tuple(points[np.argmax(sums)]),
+            "tr": tuple(points[np.argmin(diffs)]),
+            "bl": tuple(points[np.argmax(diffs)]),
+        }
 
-        return self._assign_corners(points)
-
-    def _assign_corners(self, points: list[tuple[float, float]]) -> dict[str, tuple[float, float]] | None:
-        """Tries every way to assign 4 of the candidate points to tl/tr/bl/br, and
-        keeps whichever assignment's quadrilateral shape (edge-length ratio, opposite
-        sides roughly equal) is the closest match to the template's known aspect ratio.
-        24 permutations per 4-candidate subset — cheap even with a few extra false
-        positives after _MAX_CANDIDATES_CONSIDERED.
-
-        Shape alone can't fully disambiguate orientation: a rectangle's 180-degree
-        rotation or mirror has identical edge lengths and aspect ratio. The orientation
-        penalty below breaks that tie by assuming the photo isn't upside-down or
-        mirrored — true for any normal, right-side-up capture."""
-        best: dict[str, tuple[float, float]] | None = None
-        best_score = float("inf")
-
-        for combo in itertools.permutations(points, 4):
-            tl, tr, bl, br = combo
-            top = _distance(tl, tr)
-            bottom = _distance(bl, br)
-            left = _distance(tl, bl)
-            right = _distance(tr, br)
-            if min(top, bottom, left, right) < 1e-6:
-                continue
-
-            avg_width = (top + bottom) / 2
-            avg_height = (left + right) / 2
-            aspect = avg_width / avg_height
-            shape_score = (
-                abs(aspect - _EXPECTED_ASPECT) / _EXPECTED_ASPECT
-                + abs(top - bottom) / max(top, bottom)
-                + abs(left - right) / max(left, right)
-            )
-
-            orientation_penalty = 0.0
-            if (tl[1] + tr[1]) / 2 > (bl[1] + br[1]) / 2:  # "top" pair isn't above "bottom" pair
-                orientation_penalty += 10.0
-            if (tl[0] + bl[0]) / 2 > (tr[0] + br[0]) / 2:  # "left" pair isn't left of "right" pair
-                orientation_penalty += 10.0
-
-            score = shape_score + orientation_penalty
-            if score < best_score:
-                best_score = score
-                best = {"tl": tl, "tr": tr, "bl": bl, "br": br}
-
-        return best
-
-    def _deskew(self, gray: np.ndarray, markers: dict[str, tuple[float, float]]) -> np.ndarray:
-        src_points = np.float32([markers[corner] for corner in _CORNERS])
+    def _deskew(self, gray: np.ndarray, corners: dict[str, tuple[float, float]]) -> np.ndarray:
+        src_points = np.float32([corners[corner] for corner in _CORNERS])
         dst_points = np.float32(
-            [template.mm_to_canon_px(template.MARKER_CENTERS_MM[corner]) for corner in _CORNERS]
+            [
+                (0, 0),
+                (template.CANON_WIDTH_PX, 0),
+                (0, template.CANON_HEIGHT_PX),
+                (template.CANON_WIDTH_PX, template.CANON_HEIGHT_PX),
+            ]
         )
         transform = cv2.getPerspectiveTransform(src_points, dst_points)
         return cv2.warpPerspective(gray, transform, (template.CANON_WIDTH_PX, template.CANON_HEIGHT_PX))
@@ -162,8 +113,8 @@ class OpenCvOcrService:
         _, mask = cv2.threshold(warped, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
         return mask
 
-    def _fill_ratio(self, ink_mask: np.ndarray, center_mm: tuple[float, float]) -> float:
-        cx, cy = template.mm_to_canon_px(center_mm)
+    def _fill_ratio(self, ink_mask: np.ndarray, center_frac: tuple[float, float]) -> float:
+        cx, cy = template.frac_to_canon_px(center_frac)
         # Sample inside the printed outline, not up to its edge — every bubble has a
         # printed circle whether marked or not, and including that stroke in the ROI
         # gave blank bubbles a non-trivial baseline fill ratio instead of near-zero.
@@ -178,7 +129,7 @@ class OpenCvOcrService:
     def _read_bubbles(self, ink_mask: np.ndarray) -> list[QuestionAnswer]:
         by_question: dict[int, dict[str, float]] = {}
         for bubble in template.TEMPLATE_BUBBLES:
-            ratio = self._fill_ratio(ink_mask, bubble.center_mm)
+            ratio = self._fill_ratio(ink_mask, bubble.center_frac)
             by_question.setdefault(bubble.question_number, {})[bubble.option] = ratio
 
         answers = []

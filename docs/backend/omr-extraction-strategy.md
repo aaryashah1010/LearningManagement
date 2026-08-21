@@ -6,11 +6,15 @@
 
 ## v2 decision: one fixed sheet template, pure OpenCV, in-app guided capture, no AI
 
-The platform now standardizes on **a single OMR sheet template** designed and printed
-by this project, rather than accepting whatever OMR format each tuition already uses.
-Every test uses the same physical layout — same bubble grid geometry, same fiducial
-corner markers, same dimensions. That single fact removes the entire problem the
-previous AI-vision design existed to solve.
+The platform now standardizes on **a single OMR sheet template**, rather than
+accepting whatever OMR format each tuition already uses. Every test uses the same
+physical layout — same bubble grid geometry, same dimensions. That single fact
+removes the entire problem the previous AI-vision design existed to solve.
+
+The template is the pre-existing "ATTITUDE CLASSES FOR EXCELLENCE - OMR" sheet — a
+third-party design this project adopted as-is, not one it authored. That means there's
+no print spec to read exact dimensions from; geometry below is measured from a scanned
+sample sheet, not laid out from a CAD source — see § The template.
 
 ## Why this changed
 
@@ -23,39 +27,40 @@ structure in a photo, real phone-photo noise, every tuition's sheet is a differe
 design), which is why pure OpenCV was rejected in favor of AI-vision.
 
 That constraint no longer holds. **The sheet layout is fixed and known in advance** —
-there's exactly one template, designed by this project, so bubble positions aren't
-discovered per sheet, they're read from a single config once and reused for every
-submission, every test, every student. This is the same idea the old doc's deferred
-"Future Optimization" section described as a cached template — the only difference is
-the template doesn't need to be *learned* from a first sheet, because it's fixed by
-design from day one.
+there's exactly one template, so bubble positions aren't discovered per sheet, they're
+read from a single config once and reused for every submission, every test, every
+student. This is the same idea the old doc's deferred "Future Optimization" section
+described as a cached template — the only difference is the template doesn't need to be
+*learned* from a first sheet, because it's fixed in advance.
 
 ## The template
 
-One printed sheet design (A4, portrait), used for every test regardless of
-subject/class. Geometry lives in `app/services/omr_template.py` — the printed sheet and
-the fill-reading code are generated from the same numbers, not kept in sync by hand:
+One sheet design ("ATTITUDE CLASSES FOR EXCELLENCE - OMR"), used for every test
+regardless of subject/class. Geometry lives in `app/services/omr_template.py`, expressed
+as **fractions of the detected outer table border** rather than absolute mm — this
+project doesn't control the sheet's print dimensions (it's a third-party design), only
+its now-known row/column structure:
 
 | Zone | Spec |
 |---|---|
-| Page | A4, 210 x 297mm, portrait |
-| Corner markers | 10 x 10mm solid black squares, 8mm inset from each edge |
-| Header | y: 20-52mm — title, name/test fields, printed fill guide |
-| Question grid | y: 58-273mm, two 86mm columns, 14mm gutter |
-| Rows | 25 per column, 8.36mm each — 50 questions total (Q1-25 left, Q26-50 right) |
-| Bubbles | 5mm diameter, A/B/C/D on a 16mm pitch, 12mm question-number label column |
+| Title row | sheet title, no data read from it |
+| NAME / STD row, SUB / DATE row | handwritten, **not read by this pipeline** — student identity comes from the app session the submission was uploaded under, not OCR |
+| Header row | printed A/B/C/D column labels, no data read from it |
+| Question grid | one continuous table, two equal-width blocks side by side |
+| Rows | 25 per block, evenly spaced — 50 questions total (Q1-25 left, Q26-50 right) |
+| Columns | 5 equal-width columns per block: question-number label, then A/B/C/D |
 
-**Four printed corner fiducial markers** exist specifically so orientation/skew can be
-corrected reliably regardless of how the photo was framed — this was the exact gap the
-old design flagged as missing ("an arbitrary tuition's sheet has no such markers"),
-solved here simply by owning the template and printing markers on it.
+There are **no printed corner fiducial markers** on this sheet (unlike a project-owned
+design would have) — deskewing instead detects the sheet's own outer table border: the
+largest quadrilateral contour in the photo, the same technique a generic document
+scanner uses to locate a page. See § How it works below.
 
 **Bubble geometry is a single static config** (`omr_template.py`) — not per-test, not
 learned, not cached from a first sheet. Question count is a fixed maximum (50); tests
-with fewer questions simply leave the remaining rows blank. If the template is ever
-revised, that's a new config version, still fixed and known in advance — never an
-inferred/discovered one. A printable reference of this exact layout exists as a design
-artifact (corner markers, header, and full 50-question grid rendered at true scale).
+with fewer questions simply leave the remaining rows blank. The row/column fractions
+were measured off a scanned sample sheet (`refrence/student-omr.pdf`), not derived from
+a print spec — like the fill-ratio thresholds below, they're illustrative until
+validated against more real captured photos, not an inferred/discovered-per-photo value.
 
 ## In-app guided capture
 
@@ -65,14 +70,15 @@ sheet through the app's own camera screen, which:
 - Shows a live on-screen guide (e.g. a rectangle outline) for where the sheet edges
   should sit in frame, so captures are reasonably consistent in framing and distance
   before any CV runs.
-- Can optionally attempt live marker detection in the camera preview and only enable
-  capture once all four corner markers are visible — catching a bad angle or partial
-  frame *before* the photo is taken, rather than after upload.
+- Can optionally attempt live table-border detection in the camera preview and only
+  enable capture once the sheet's outer border is fully visible and reasonably square —
+  catching a bad angle or partial frame *before* the photo is taken, rather than after
+  upload.
 
 This doesn't eliminate real-world capture noise (lighting, shadows, slight blur are
 still possible), but it bounds it a lot more than an unconstrained gallery photo would —
-combined with the fixed template and printed markers, it's what makes a pure-OpenCV
-pipeline viable without AI as a fallback.
+combined with the fixed template, it's what makes a pure-OpenCV pipeline viable without
+AI as a fallback.
 
 ## How it works
 
@@ -90,11 +96,11 @@ directly, no CV involved.
 Captured sheet photo
         │
         ▼
-1. Detect the 4 corner fiducial markers (contour detection)
-        │  — not found / fewer than 4 → extraction fails outright,
-        │    submission flagged for retake, never silently guessed
+1. Detect the sheet's outer table border (largest quadrilateral contour)
+        │  — not found → extraction fails outright, submission flagged
+        │    for retake, never silently guessed
         ▼
-2. Compute homography from detected marker positions → warp/deskew
+2. Compute homography from the detected border's 4 corners → warp/deskew
    to the canonical (fixed-size, fixed-orientation) image
         │
         ▼
@@ -126,7 +132,7 @@ AI label — the same style of check any classical OMR reader uses:
 | Top option below the fill threshold but not by much | e.g. 20%, threshold 35% | `needs_review = true` — could be a genuine mark the CV under-read, not just blank |
 | Two or more bubbles independently clear the fill threshold | e.g. B = 55%, C = 48% | `needs_review = true` (double-mark) |
 | One bubble above threshold but a close runner-up | e.g. B = 40%, C = 32% | `needs_review = true` (low-confidence fill) |
-| Fewer than 4 corner markers detected at all | — | Whole submission fails extraction, flagged for retake — never partially guessed |
+| Outer table border not detected at all | — | Whole submission fails extraction, flagged for retake — never partially guessed |
 
 A genuinely blank answer is common (most students skip questions) and isn't itself
 ambiguous — flagging every blank for review would flood the teacher's queue with
@@ -177,25 +183,30 @@ interface at all; that's added when subjective grading is actually built, as its
 single-template implementation — kept in the signature so a future multi-template
 design (§ below) can use it without changing the interface or any caller.
 
-Verified with a synthetic test image (markers + filled bubbles rendered from the same
-`omr_template.py` geometry, then rotated a few degrees to simulate photo skew) —
-the pipeline correctly deskews, reads the marked bubbles, and flags an unmarked
-question as `needs_review`. This confirms the pipeline mechanics work; it is **not**
-validation against a real photographed sheet — see the unresolved items below.
+Verified against real scanned sample sheets (`refrence/student-omr.pdf`, 12 filled
+sheets) rendered to photo-like JPEGs — the pipeline correctly detects the table border,
+deskews, and reads all 50 answers on multiple sample sheets, with only genuinely
+faint/ambiguous marks in the source sheets correctly flagged `needs_review`. This
+confirms the pipeline mechanics work against real handwriting and real fill variation;
+it is **not** yet validation against actual phone-camera photos (lighting, perspective,
+motion blur) — see the unresolved items below.
 
 ## What still needs deciding / validating before this is committed
 
-- **Marker size/contrast** — how large and how high-contrast the corner markers need to
-  be printed for reliable detection under real phone-camera conditions (lighting,
-  compression, slight blur) — needs testing against real printed/photographed sheets,
-  not assumed.
+- **Table-border detection under real photo conditions** — the outer-border contour
+  detection was validated against scanned sheets (clean background, no perspective);
+  it still needs testing against real phone photos, where background clutter, lighting,
+  and non-90-degree viewing angles could make the sheet's border harder to isolate than
+  a page's real markers would have been.
 - **Fill-ratio threshold tuning** — the percentages in § Confidence & Teacher Review
-  above are illustrative, not validated. Real threshold values need tuning against a
-  batch of real captured sheets before being trusted in production.
-- **Live in-app marker detection** is a client-side capture-quality feature, not a
-  backend concern — this doc only requires that captured images eventually contain all
-  four markers; how strictly the app enforces that before allowing capture is a frontend
-  decision, not specified here.
+  above are illustrative, not validated. Unmarked bubbles on this sheet measured a
+  higher baseline fill ratio (~30%) than the old template's baseline, closer to the
+  35% "marked" threshold than is comfortable — real threshold values need tuning
+  against a batch of real captured sheets before being trusted in production.
+- **Live in-app border detection** is a client-side capture-quality feature, not a
+  backend concern — this doc only requires that captured images eventually contain the
+  full sheet with its border visible; how strictly the app enforces that before allowing
+  capture is a frontend decision, not specified here.
 - **Sheet printing/distribution** — how the one template actually gets into students'
   hands (pre-printed by the tuition, generated per-test, etc.) is outside this doc's
   scope; it only assumes every submission is a photo of that one fixed layout.
