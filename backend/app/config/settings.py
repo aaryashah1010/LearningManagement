@@ -29,7 +29,12 @@ class Settings(BaseSettings):
     # Only needed for OpenAI-compatible providers with a non-default endpoint (NVIDIA, Gemini).
     LLM_BASE_URL: str | None = None
 
-    CV_OCR_PROVIDER: Literal["opencv"] = "opencv"
+    BUBBLE_DETECTION_PROVIDER: Literal["opencv"] = "opencv"
+
+    # Handwriting OCR (e.g. the submission header's NAME field) — Cloud Vision for now,
+    # swappable for another provider later without touching any caller of IOcrService.
+    OCR_PROVIDER: Literal["google_vision"] = "google_vision"
+    VISION_API_KEY: str = ""
 
     # Object storage — "local" writes to disk for dev, no cloud credentials needed
     STORAGE_PROVIDER: Literal["local", "s3"] = "local"

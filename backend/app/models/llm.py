@@ -15,3 +15,9 @@ class NodeMapping(BaseModel):
     question_id: int
     node_id: int
     reasoning: str
+
+
+class BubbleJudgment(BaseModel):
+    question_number: int
+    selected_option: str | None
+    confidence: float

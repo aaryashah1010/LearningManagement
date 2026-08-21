@@ -80,6 +80,19 @@ def frac_to_canon_px(point_frac: tuple[float, float]) -> tuple[float, float]:
     return (x_frac * CANON_WIDTH_PX, y_frac * CANON_HEIGHT_PX)
 
 
+def question_row_bbox_frac(question_number: int) -> tuple[float, float, float, float]:
+    """Bounding box (x0, x1, y0, y1) of one question's full row — label column plus
+    all four options — as fractions of the canonical table. Used to crop a single
+    ambiguous row for AI adjudication, not for bubble sampling."""
+    block_index = 0 if question_number <= ROWS_PER_BLOCK else 1
+    row_index = (question_number - 1) % ROWS_PER_BLOCK
+    x0 = BLOCK_X_FRACS[block_index]
+    x1 = x0 + BLOCK_WIDTH_FRAC
+    y0 = DATA_ROWS_TOP_FRAC + row_index * ROW_HEIGHT_FRAC
+    y1 = y0 + ROW_HEIGHT_FRAC
+    return x0, x1, y0, y1
+
+
 # Sized off row height (not a printed bubble diameter, since we don't have one) —
 # large enough to comfortably sit inside a hand-drawn circle without reaching its
 # printed outline.

@@ -166,9 +166,9 @@ No table stores marks on `curriculum_nodes` — the taxonomy is shared, read-onl
 - **Results never touch the taxonomy.** Every graded result is a row in `answers`, referencing a `question_id` — which node(s) it counts toward is derived by joining through `question_node_map`, not stored redundantly on `answers` or written onto `curriculum_nodes`. Per-student and class-wide reports are both just different `GROUP BY` scopes over the same `answers` rows, computed on demand, not precomputed onto the taxonomy.
 - **Grading is mechanical, not AI, at submission time.** `answers.is_correct` comes from bubble-fill detection + answer-key comparison — the only AI cost in the whole pipeline is the one-time question-mapping call at test setup. See [omr-grading.md](../omr-grading.md).
 - **`question_type`, `model_answer`, `keyword_key`, `ai_summary`, `marks_awarded` are removed entirely, not kept as unused nullable columns.** An earlier draft argued these were cheap enough to keep around "just in case" — reversed on review: subjective grading is a fully separate future PR, not a deferred piece of this one, so the schema for this PR should only describe what it actually builds (MCQ/OMR). `questions` has no type discriminator since every question in scope is MCQ; `answers.is_correct` alone is sufficient for MCQ scoring (score = `is_correct ? max_marks : 0`), so `marks_awarded` isn't needed here either — it was only ever justified by subjective's variable partial credit. All of these come back together, as real columns backing real functionality, when subjective grading is actually built.
-- **`submissions.student_id` is always the uploading student, never nullable.** In v1, a student only ever uploads their own sheet under their own login — there's no teacher-bulk-upload path yet, so there's nothing to resolve identity for later. This was `NULL`-able in an earlier draft to support a manual-match-to-roster fallback; that fallback (along with the QR-mismatch rejection check) only comes back once teacher bulk-upload is actually built (see the `roll_number`/QR decision above).
+- **`submissions.student_id` is nullable — teacher bulk-upload replaced the login-only MVP.** Requirements changed: a teacher now uploads one PDF containing every student's sheet for a test, so there's no login to derive identity from. Identity is resolved by OCR-reading the sheet's handwritten NAME field (via the existing `ILlmService`, not a new provider — see [omr-extraction-strategy.md](omr-extraction-strategy.md)) and exact-matching the normalized (lowercased, whitespace-collapsed) name against the class roster. A failed match doesn't drop the row — `student_id` stays `NULL`, `status = 'needs_review'`, and `raw_extracted_name` holds what OCR read, for a teacher to resolve manually (the "manual thumbnail-to-roster matching" fallback [accounts-and-roster.md](../accounts-and-roster.md) already anticipated, just triggered by OCR mismatch instead of "no identifying mark at all"). Roll number as a stronger identifier (per that doc's Phase 2 options) is a deliberate future improvement, not built now — exact name matching is the whole matching strategy for v1.
 - **No `test_layout_templates` table in v1 — extraction reads every sheet directly, no cached layout.** An earlier draft added this table for a cached-template/CV-first design; that approach is now a documented future optimization, not the v1 build, since it carried unvalidated registration/threshold risk that a simpler AI-vision-reads-every-sheet approach avoids entirely. See [omr-extraction-strategy.md § Future Optimization](omr-extraction-strategy.md#future-optimization-not-v1-cached-template-cv-first-detection) for the deferred design and the schema it would need if revisited. **v1 assumes a single-page OMR sheet** (a single `submissions.image_url`) — a multi-page bubble sheet isn't supported yet.
-- **`submissions.image_url` is a single column, not a one-to-many `submission_pages` table — reverted back after a closer look.** A multi-page relation was added, then removed: it exists to support multi-page subjective booklets, which aren't in scope right now. Building that structure now would be exactly the kind of unused-until-later complexity avoided everywhere else in this schema — reintroduce a multi-page relation when subjective grading is actually being built and multi-page is confirmed necessary, not before. Whenever multi-page support does come back, it should still be plain per-page images, not a bundled PDF — see [omr-extraction-strategy.md § Input format](omr-extraction-strategy.md#input-format) for why.
+- **`submissions.image_url` is a single column, not a one-to-many `submission_pages` table — reverted back after a closer look.** A multi-page relation was added, then removed: it exists to support multi-page subjective booklets, which aren't in scope right now. Building that structure now would be exactly the kind of unused-until-later complexity avoided everywhere else in this schema — reintroduce a multi-page relation when subjective grading is actually being built and multi-page is confirmed necessary, not before. This still holds under teacher bulk-upload: the *upload* is one PDF, but it's split into one `submissions` row (and one stored `image_url`) per page immediately on ingestion — the raw bundled PDF itself is never what gets stored per submission.
 - **No difficulty tagging.** Considered and deliberately dropped for v1 — an AI guess at difficulty is unreliable on its own; if added later, the better version is computed from real submitted results (`% of students who got a question right`), not a metadata field guessed at setup time.
 
 ---
@@ -338,9 +338,13 @@ CREATE TABLE question_node_map (
     INDEX idx_question_node_map_node (node_id)
 ) ENGINE=InnoDB;
 
--- One row per uploaded sheet per student per test. student_id is always
--- the uploading student's own id (login-only identification, v1) — see
--- § Design Decisions for what comes back once teacher bulk-upload ships.
+-- One row per page of a teacher-uploaded bulk OMR PDF per test. student_id is
+-- nullable — teacher bulk-upload identifies the student by OCR-reading the
+-- sheet's handwritten NAME field and exact-matching it against the class
+-- roster; when that match fails, the row is still kept (status =
+-- 'needs_review', raw_extracted_name populated) for a teacher to resolve
+-- manually, rather than being dropped. MySQL's unique index treats each NULL
+-- student_id as distinct, so multiple unresolved rows per test are fine.
 -- image_url is a single column, not a one-to-many page relation — v1 is
 -- single-page OMR only. Revisit as a submission_pages table if/when
 -- multi-page subjective booklets are actually being built (still per-page
@@ -348,8 +352,9 @@ CREATE TABLE question_node_map (
 CREATE TABLE submissions (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     test_id BIGINT UNSIGNED NOT NULL,
-    student_id BIGINT UNSIGNED NOT NULL,
+    student_id BIGINT UNSIGNED NULL,
     image_url VARCHAR(500) NOT NULL,
+    raw_extracted_name VARCHAR(255) NULL,
     status ENUM('pending','processed','needs_review') NOT NULL DEFAULT 'pending',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

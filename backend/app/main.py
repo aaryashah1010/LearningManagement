@@ -16,6 +16,7 @@ from app.routers import (
     class_router,
     health_router,
     subject_router,
+    submission_router,
     test_router,
 )
 from app.utils.errors import ERRORS
@@ -49,3 +50,4 @@ app.include_router(class_router.router)
 app.include_router(subject_router.router)
 app.include_router(book_router.router)
 app.include_router(test_router.router)
+app.include_router(submission_router.router)

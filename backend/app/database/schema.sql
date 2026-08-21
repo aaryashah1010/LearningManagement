@@ -153,9 +153,13 @@ CREATE TABLE question_node_map (
     INDEX idx_question_node_map_node (node_id)
 ) ENGINE=InnoDB;
 
--- One row per uploaded sheet per student per test. student_id is always
--- the uploading student's own id (login-only identification, v1) — see
--- § Design Decisions for what comes back once teacher bulk-upload ships.
+-- One row per page of a teacher-uploaded bulk OMR PDF per test. student_id is
+-- nullable — teacher bulk-upload (§ Design Decisions) identifies the student by
+-- OCR-reading the sheet's handwritten NAME field and exact-matching it against
+-- the class roster; when that match fails, the row is still kept (status =
+-- 'needs_review', raw_extracted_name populated) for a teacher to resolve
+-- manually, rather than being dropped. MySQL's unique index treats each NULL
+-- student_id as distinct, so multiple unresolved rows per test are fine.
 -- image_url is a single column, not a one-to-many page relation — v1 is
 -- single-page OMR only. Revisit as a submission_pages table if/when
 -- multi-page subjective booklets are actually being built (still per-page
@@ -163,8 +167,9 @@ CREATE TABLE question_node_map (
 CREATE TABLE submissions (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     test_id BIGINT UNSIGNED NOT NULL,
-    student_id BIGINT UNSIGNED NOT NULL,
+    student_id BIGINT UNSIGNED NULL,
     image_url VARCHAR(500) NOT NULL,
+    raw_extracted_name VARCHAR(255) NULL,
     status ENUM('pending','processed','needs_review') NOT NULL DEFAULT 'pending',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

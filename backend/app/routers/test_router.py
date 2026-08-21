@@ -7,7 +7,7 @@ from app.models.question import BulkQuestionsRequest, SetQuestionNodeRequest
 from app.models.test import CreateTestData
 from app.repositories.curriculum_node_repository import CurriculumNodeRepository
 from app.repositories.test_repository import TestRepository
-from app.services.llm_service import ILlmService, get_llm_service
+from app.services.llm.llm_service import ILlmService, get_llm_service
 from app.types.token import TokenData
 from app.utils.errors import ERRORS
 from app.utils.logger import get_logger

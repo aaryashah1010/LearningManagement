@@ -1,10 +1,11 @@
+import base64
 import json
 from typing import Protocol
 
 from openai import AsyncOpenAI
 
 from app.config.settings import settings
-from app.models.llm import NodeMapping, QuestionToMap, TaxonomyNode
+from app.models.llm import BubbleJudgment, NodeMapping, QuestionToMap, TaxonomyNode
 from app.utils.errors import ERRORS, AppError
 from app.utils.result import Result, err, ok
 
@@ -13,6 +14,9 @@ class ILlmService(Protocol):
     async def map_questions_to_nodes(
         self, questions: list[QuestionToMap], candidates: list[TaxonomyNode]
     ) -> Result[list[NodeMapping], "AppError"]: ...
+    async def adjudicate_bubbles(
+        self, crops: list[tuple[int, bytes]]
+    ) -> Result[list[BubbleJudgment], "AppError"]: ...
 
 
 _SYSTEM_PROMPT = (
@@ -66,6 +70,23 @@ _SYSTEM_PROMPT = (
 )
 
 
+_BUBBLE_SYSTEM_PROMPT = (
+    "You read cropped rows from an OMR answer sheet — each row shows one question's "
+    "number and its A/B/C/D bubbles. Bubble fill detection couldn't confidently decide "
+    "these particular rows (faint marks, double marks, crossed-out marks), so you make "
+    "the call a human grader would: which single option, if any, is the student's real "
+    "answer. A crossed-out or scribbled-over mark means the student changed their answer "
+    "— read what they corrected it to, not what they crossed out; if genuinely two "
+    "options are both cleanly filled with no correction indicated, or nothing is legibly "
+    "marked, say so with low confidence rather than guessing.\n\n"
+    'Respond with ONLY a JSON object: {"answers": [{"question_number": <number>, '
+    '"selected_option": "A"|"B"|"C"|"D"|null, "confidence": <0.0-1.0>}, ...]}. Include '
+    "exactly one entry per row image you were given, in any order. confidence reflects "
+    "how sure you are of selected_option (or of it being unanswered, if null) — low "
+    "confidence for anything genuinely ambiguous, not just to hedge."
+)
+
+
 class OpenAiCompatibleLlmService:
     """Calls any provider exposing an OpenAI-compatible chat completions endpoint (NVIDIA,
     Gemini, OpenAI itself) — which base_url/model/key is used comes entirely from config,
@@ -115,6 +136,49 @@ class OpenAiCompatibleLlmService:
             return err(ERRORS["LLM_SERVICE_ERROR"])
 
         return ok(mappings)
+
+    async def adjudicate_bubbles(
+        self, crops: list[tuple[int, bytes]]
+    ) -> Result[list[BubbleJudgment], "AppError"]:
+        if not crops:
+            return err(ERRORS["LLM_SERVICE_ERROR"])
+
+        content = []
+        for question_number, image in crops:
+            image_b64 = base64.b64encode(image).decode()
+            content.append({"type": "text", "text": f"Question {question_number}:"})
+            content.append(
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}}
+            )
+
+        try:
+            response = await self._client.chat.completions.create(
+                model=settings.LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": _BUBBLE_SYSTEM_PROMPT},
+                    {"role": "user", "content": content},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            data = json.loads(response.choices[0].message.content)
+            judgments = [
+                BubbleJudgment(
+                    question_number=int(a["question_number"]),
+                    selected_option=a["selected_option"],
+                    confidence=float(a["confidence"]),
+                )
+                for a in data["answers"]
+            ]
+        except Exception:
+            return err(ERRORS["LLM_SERVICE_ERROR"])
+
+        expected = {q for q, _ in crops}
+        returned = {j.question_number for j in judgments}
+        if returned != expected:
+            return err(ERRORS["LLM_SERVICE_ERROR"])  # missing, duplicate, or extra questions
+
+        return ok(judgments)
 
 
 def get_llm_service() -> ILlmService:

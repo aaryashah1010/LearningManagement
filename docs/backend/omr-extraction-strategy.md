@@ -1,6 +1,6 @@
 # OMR Answer Extraction Strategy — Answer Key & Student Sheets
 
-> Implements the extraction side of `ICvOcrService` (`backend-guide.md` § Service Layer).
+> Implements the extraction side of `IBubbleService` (`backend-guide.md` § Service Layer).
 > Supersedes the earlier AI-vision-per-sheet design that assumed an arbitrary,
 > never-seen tuition sheet layout — see § Why this changed below.
 
@@ -127,12 +127,22 @@ AI label — the same style of check any classical OMR reader uses:
 
 | Pattern | Detected fill ratios | Result |
 |---|---|---|
-| Exactly one bubble clearly above the fill threshold, no close runner-up | e.g. B = 78%, others < 15% | Auto-accept, no review |
-| Every option nowhere near the fill threshold | all below ~10% | Auto-accept as unanswered, no review — unambiguously blank |
-| Top option below the fill threshold but not by much | e.g. 20%, threshold 35% | `needs_review = true` — could be a genuine mark the CV under-read, not just blank |
-| Two or more bubbles independently clear the fill threshold | e.g. B = 55%, C = 48% | `needs_review = true` (double-mark) |
-| One bubble above threshold but a close runner-up | e.g. B = 40%, C = 32% | `needs_review = true` (low-confidence fill) |
-| Outer table border not detected at all | — | Whole submission fails extraction, flagged for retake — never partially guessed |
+| Exactly one bubble clearly above the fill threshold, no close runner-up | e.g. B = 95%, others ~30% | Auto-accept, no review |
+| Every option nowhere near the fill threshold | all below ~45% | Auto-accept as unanswered, no review — unambiguously blank |
+| Top option below the fill threshold but not by much | e.g. 55%, threshold 65% | `needs_review = true` — could be a genuine mark the CV under-read, not just blank |
+| Two or more bubbles independently clear the fill threshold | e.g. B = 99%, C = 93% | `needs_review = true` (double-mark — often a crossed-out/corrected answer in practice) |
+| One bubble above threshold but a close runner-up | e.g. B = 70%, C = 62% | `needs_review = true` (low-confidence fill) |
+| Outer table border not detected at all, or the table fills too much of the frame (< 20% or > 80% of the photo's area) | — | Whole submission fails extraction, flagged for retake — never partially guessed |
+
+Thresholds (`FILL_THRESHOLD = 0.65`, `CONFIDENT_BLANK_THRESHOLD = 0.45`) sit well clear
+of this sheet's actual noise floor: an unmarked printed circle on this sheet carries more
+baseline scan/print ink than the project's own earlier template did (~30-40% fill even
+with nothing drawn in it, not near-zero) — a placeholder threshold of 35% (same order as
+that noise) was tried first and produced false positives on a large fraction of clearly-
+answered questions in testing, both wrongly flagging confident marks as "double-marks"
+(their empty runner-up crossed the low bar) and wrongly flagging genuine blanks as
+"under-read" (blank noise exceeded a too-low blank cutoff). Recalibrated against real
+percentile data (marks read ~85-100%, noise sits ~27-40%) instead of guessing.
 
 A genuinely blank answer is common (most students skip questions) and isn't itself
 ambiguous — flagging every blank for review would flood the teacher's queue with
@@ -147,32 +157,38 @@ of an AI confidence label.
 
 ## Provider abstraction — this can still change without touching any caller
 
-`ICvOcrService` (§ Interface shape below) is still the reason this decision isn't a
+`IBubbleService` (§ Interface shape below) is still the reason this decision isn't a
 one-way door — same pattern as `ILlmService` in `backend-guide.md` § Service Layer &
 Provider Abstraction. Whether extraction is this fixed-template OpenCV pipeline, a
 future multi-template design, or AI-vision again someday, is an implementation detail of
 one class behind that interface. Routers, the submission pipeline, and every other
-caller only ever depend on `ICvOcrService`'s method signatures, never on a concrete
+caller only ever depend on `IBubbleService`'s method signatures, never on a concrete
 implementation — swapping the underlying approach is a new implementation class plus a
 config value, with zero changes to any code that calls it.
 
-## Interface shape (`ICvOcrService`)
+## Interface shape (`IBubbleService`)
 
-Implemented — `app/services/cv_ocr_service.py`:
+Implemented — `app/services/bubble/bubble_service.py`. Named for what it actually reads
+(the bubble grid), not "OCR" — that name is reserved for `IOcrService`
+(`app/services/ocr/ocr_service.py`), the separate handwriting-reading service used for
+the submission header's NAME field (see `accounts-and-roster.md` § Student Identification
+on Upload):
 
 ```python
-class ICvOcrService(Protocol):
+class IBubbleService(Protocol):
     async def detect_bubbles(self, image: bytes, test_id: int) -> Result[AnswerMap, "AppError"]: ...
+    async def extract_name_region(self, image: bytes) -> Result[bytes, "AppError"]: ...
 
-class OpenCvOcrService:
+class OpenCvBubbleService:
     """Pure OpenCV against the one fixed sheet template. No AI, no per-photo bubble
     discovery — positions come from omr_template.py."""
     async def detect_bubbles(self, image: bytes, test_id: int) -> Result[AnswerMap, "AppError"]: ...
+    async def extract_name_region(self, image: bytes) -> Result[bytes, "AppError"]: ...
 
-def get_cv_ocr_service() -> ICvOcrService:
-    if settings.CV_OCR_PROVIDER == "opencv":
-        return OpenCvOcrService()
-    raise ValueError(f"Unknown CV_OCR_PROVIDER: {settings.CV_OCR_PROVIDER}")
+def get_bubble_service() -> IBubbleService:
+    if settings.BUBBLE_DETECTION_PROVIDER == "opencv":
+        return OpenCvBubbleService()
+    raise ValueError(f"Unknown BUBBLE_DETECTION_PROVIDER: {settings.BUBBLE_DETECTION_PROVIDER}")
 ```
 
 Same shape as originally designed. MCQ/OMR only — no handwriting/OCR method on this
@@ -198,11 +214,12 @@ motion blur) — see the unresolved items below.
   it still needs testing against real phone photos, where background clutter, lighting,
   and non-90-degree viewing angles could make the sheet's border harder to isolate than
   a page's real markers would have been.
-- **Fill-ratio threshold tuning** — the percentages in § Confidence & Teacher Review
-  above are illustrative, not validated. Unmarked bubbles on this sheet measured a
-  higher baseline fill ratio (~30%) than the old template's baseline, closer to the
-  35% "marked" threshold than is comfortable — real threshold values need tuning
-  against a batch of real captured sheets before being trusted in production.
+- **Fill-ratio thresholds are calibrated against 12 real scanned sample sheets**
+  (`refrence/student-omr.pdf`, 600 question-readings), not phone-camera photos — real
+  captures will add lighting/perspective/compression noise this data doesn't have, so
+  these values (`FILL_THRESHOLD = 0.65`, `CONFIDENT_BLANK_THRESHOLD = 0.45`) may still
+  need retuning once real photos are available, just from a validated starting point
+  instead of a guess.
 - **Live in-app border detection** is a client-side capture-quality feature, not a
   backend concern — this doc only requires that captured images eventually contain the
   full sheet with its border visible; how strictly the app enforces that before allowing

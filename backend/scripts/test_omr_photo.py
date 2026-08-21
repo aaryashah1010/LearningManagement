@@ -1,5 +1,5 @@
 """
-Dev utility — run a real photo through OpenCvOcrService directly, no app/DB needed.
+Dev utility — run a real photo through OpenCvBubbleService directly, no app/DB needed.
 
 Usage:
     uv run python scripts/test_omr_photo.py path/to/photo.jpg
@@ -11,7 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.services.cv_ocr_service import OpenCvOcrService  # noqa: E402
+from app.services.bubble.bubble_service import OpenCvBubbleService  # noqa: E402
+from app.services.llm.llm_service import get_llm_service  # noqa: E402
 
 
 async def main() -> None:
@@ -22,7 +23,7 @@ async def main() -> None:
     image_path = Path(sys.argv[1])
     image_bytes = image_path.read_bytes()
 
-    service = OpenCvOcrService()
+    service = OpenCvBubbleService(get_llm_service())
     result = await service.detect_bubbles(image_bytes, test_id=1)
 
     if result.is_err():
