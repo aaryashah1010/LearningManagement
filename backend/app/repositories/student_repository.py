@@ -2,8 +2,9 @@ from typing import Protocol
 
 from mysql.connector.errors import IntegrityError
 
-from app.database.pool import execute, fetch_one
-from app.models.student import Student
+from app.database.pool import execute, fetch_all, fetch_one
+from app.models.student import Student, StudentView
+from app.types.pagination import PageInfo, Paginated
 from app.utils.errors import ERRORS, AppError
 from app.utils.logger import get_logger
 from app.utils.result import Result, err, ok
@@ -14,6 +15,7 @@ logger = get_logger("student_repository")
 class IStudentRepository(Protocol):
     def find_by_email_or_phone(self, email: str | None, phone: str | None) -> Result[Student, AppError]: ...
     def find_by_id(self, student_id: int) -> Result[Student, AppError]: ...
+    def list_all(self, cursor: int | None, limit: int) -> Result[Paginated[StudentView], AppError]: ...
     def create(
         self, name: str, email: str | None, phone: str | None, password_hash: str
     ) -> Result[Student, AppError]: ...
@@ -43,6 +45,27 @@ class StudentRepositoryImpl(IStudentRepository):
             return ok(Student(**row))
         except Exception:
             logger.exception("Error finding student by id")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def list_all(self, cursor: int | None, limit: int) -> Result[Paginated[StudentView], AppError]:
+        try:
+            rows = fetch_all(
+                "SELECT id, name, email, phone FROM students WHERE id > %s ORDER BY id ASC LIMIT %s",
+                (cursor or 0, limit + 1),
+            )
+            has_next = len(rows) > limit
+            page_rows = rows[:limit]
+            return ok(
+                Paginated(
+                    data=[StudentView(**r) for r in page_rows],
+                    pagination=PageInfo(
+                        has_next=has_next,
+                        next_cursor=page_rows[-1]["id"] if has_next else None,
+                    ),
+                )
+            )
+        except Exception:
+            logger.exception("Error listing students")
             return err(ERRORS["DATABASE_ERROR"])
 
     def create(

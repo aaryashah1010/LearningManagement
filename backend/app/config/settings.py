@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     # App
     ENV: Literal["development", "test", "production"] = "development"
     PORT: int = 8000
+    FRONTEND_URL: str = "http://localhost:3000"
 
     # Database
     DB_HOST: str = "localhost"

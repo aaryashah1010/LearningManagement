@@ -2,10 +2,12 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
+from app.config.settings import settings
 from app.database.pool import connect_to_database
 from app.middleware.error_handlers import register_error_handlers
 from app.middleware.rate_limit import limiter
@@ -33,6 +35,13 @@ app = FastAPI(title="Learning Management API", lifespan=lifespan)
 
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.FRONTEND_URL],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 register_error_handlers(app)
 

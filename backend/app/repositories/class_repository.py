@@ -6,6 +6,7 @@ from mysql.connector.errors import IntegrityError
 from app.database.pool import execute, fetch_all, fetch_one, transaction
 from app.models.class_ import Class, ClassDetail
 from app.models.student import Student, StudentView
+from app.models.teacher import TeacherView
 from app.types.pagination import PageInfo, Paginated
 from app.utils.errors import ERRORS, AppError
 from app.utils.logger import get_logger
@@ -45,6 +46,7 @@ class IClassRepository(Protocol):
     def assign_teacher(self, class_id: int, teacher_id: int) -> Result[None, AppError]: ...
     def unassign_teacher(self, class_id: int, teacher_id: int) -> Result[None, AppError]: ...
     def is_teacher_assigned(self, class_id: int, teacher_id: int) -> Result[bool, AppError]: ...
+    def list_assigned_teachers(self, class_id: int) -> Result[list[TeacherView], AppError]: ...
     def list_assigned_classes(
         self, teacher_id: int, cursor: int | None, limit: int
     ) -> Result[Paginated[Class], AppError]: ...
@@ -301,6 +303,19 @@ class ClassRepositoryImpl(IClassRepository):
             return ok(row is not None)
         except Exception:
             logger.exception("Error checking teacher assignment")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def list_assigned_teachers(self, class_id: int) -> Result[list[TeacherView], AppError]:
+        try:
+            rows = fetch_all(
+                "SELECT t.id, t.name, t.email, t.role FROM teachers t "
+                "JOIN class_teachers ct ON ct.teacher_id = t.id "
+                "WHERE ct.class_id = %s ORDER BY t.id ASC",
+                (class_id,),
+            )
+            return ok([TeacherView(**r) for r in rows])
+        except Exception:
+            logger.exception("Error listing assigned teachers")
             return err(ERRORS["DATABASE_ERROR"])
 
     def list_assigned_classes(

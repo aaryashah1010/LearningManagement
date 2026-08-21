@@ -105,6 +105,19 @@ async def remove_enrollment(
     return JSONResponse(status_code=200, content=success_response(None, "Student removed from class"))
 
 
+@router.get("/{class_id}/teachers")
+async def list_class_teachers(
+    class_id: int, current_user: TokenData = Depends(get_current_teacher_or_admin)
+) -> JSONResponse:
+    scoped = _ensure_assigned_or_admin(class_id, current_user)
+    if scoped.is_err():
+        return _err(scoped.error)
+    result = ClassRepository.list_assigned_teachers(class_id)
+    if result.is_err():
+        return _err(result.error)
+    return JSONResponse(status_code=200, content=success_response([t.model_dump() for t in result.value]))
+
+
 @router.post("/{class_id}/teachers")
 async def assign_teacher(
     class_id: int, body: AssignTeacherRequest, current_admin: TokenData = Depends(get_current_admin)
