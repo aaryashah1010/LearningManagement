@@ -3,7 +3,10 @@ from typing import Protocol
 
 from app.config.settings import settings
 from app.utils.errors import ERRORS, AppError
+from app.utils.logger import get_logger
 from app.utils.result import Result, err, ok
+
+logger = get_logger("storage_service")
 
 
 class IStorageService(Protocol):
@@ -22,6 +25,7 @@ class LocalStorageService:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(file)
         except OSError:
+            logger.exception("Error writing file to local storage")
             return err(ERRORS["STORAGE_UPLOAD_FAILED"])
         return ok(str(path))
 

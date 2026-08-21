@@ -1,7 +1,10 @@
 import pymupdf as fitz
 
 from app.utils.errors import ERRORS, AppError
+from app.utils.logger import get_logger
 from app.utils.result import Result, err, ok
+
+logger = get_logger("pdf_service")
 
 # Matches the DPI validated against the OMR sample sheets in omr-extraction-strategy.md.
 RENDER_DPI = 200
@@ -20,4 +23,5 @@ def split_pdf_to_page_images(pdf_bytes: bytes) -> Result[list[bytes], AppError]:
             images = [page.get_pixmap(matrix=matrix).tobytes("png") for page in document]
         return ok(images)
     except Exception:
+        logger.exception("Error splitting bulk submission PDF")
         return err(ERRORS["SUBMISSION_PDF_INVALID"])

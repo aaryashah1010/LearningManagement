@@ -7,7 +7,10 @@ from openai import AsyncOpenAI
 from app.config.settings import settings
 from app.models.llm import BubbleJudgment, NodeMapping, QuestionToMap, TaxonomyNode
 from app.utils.errors import ERRORS, AppError
+from app.utils.logger import get_logger
 from app.utils.result import Result, err, ok
+
+logger = get_logger("llm_service")
 
 
 class ILlmService(Protocol):
@@ -17,6 +20,7 @@ class ILlmService(Protocol):
     async def adjudicate_bubbles(
         self, crops: list[tuple[int, bytes]]
     ) -> Result[list[BubbleJudgment], "AppError"]: ...
+    async def read_whole_sheet(self, image: bytes) -> Result[list[BubbleJudgment], "AppError"]: ...
 
 
 _SYSTEM_PROMPT = (
@@ -87,6 +91,19 @@ _BUBBLE_SYSTEM_PROMPT = (
 )
 
 
+_WHOLE_SHEET_SYSTEM_PROMPT = (
+    "Read this OMR sheet: 50 questions (1-25 left block, 26-50 right block), each with "
+    "A/B/C/D bubbles. For each question give the filled option (or null if blank/unclear) "
+    "and a confidence 0-1. If a mark is crossed out, use the corrected answer, not the "
+    "crossed-out one.\n\n"
+    'JSON only: {"answers":[{"question_number":<1-50>,"selected_option":"A"|"B"|"C"|"D"|'
+    'null,"confidence":<0-1>}]} — one entry per question 1 to 50.'
+)
+# Kept deliberately short — a longer prompt combined with an image and json_object mode
+# was observed to hang indefinitely on one OpenAI-compatible provider (NVIDIA NIM); the
+# same request with a short prompt returns normally. See omr-extraction-strategy.md.
+
+
 class OpenAiCompatibleLlmService:
     """Calls any provider exposing an OpenAI-compatible chat completions endpoint (NVIDIA,
     Gemini, OpenAI itself) — which base_url/model/key is used comes entirely from config,
@@ -125,6 +142,7 @@ class OpenAiCompatibleLlmService:
                 for m in data["mappings"]
             ]
         except Exception:
+            logger.exception("map_questions_to_nodes call failed")
             return err(ERRORS["LLM_SERVICE_ERROR"])
 
         valid_node_ids = {c.id for c in candidates}
@@ -171,11 +189,47 @@ class OpenAiCompatibleLlmService:
                 for a in data["answers"]
             ]
         except Exception:
+            logger.exception("adjudicate_bubbles call failed")
             return err(ERRORS["LLM_SERVICE_ERROR"])
 
         expected = {q for q, _ in crops}
         returned = {j.question_number for j in judgments}
         if returned != expected:
+            return err(ERRORS["LLM_SERVICE_ERROR"])  # missing, duplicate, or extra questions
+
+        return ok(judgments)
+
+    async def read_whole_sheet(self, image: bytes) -> Result[list[BubbleJudgment], "AppError"]:
+        image_b64 = base64.b64encode(image).decode()
+        try:
+            response = await self._client.chat.completions.create(
+                model=settings.LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": _WHOLE_SHEET_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}}
+                        ],
+                    },
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            data = json.loads(response.choices[0].message.content)
+            judgments = [
+                BubbleJudgment(
+                    question_number=int(a["question_number"]),
+                    selected_option=a["selected_option"],
+                    confidence=float(a["confidence"]),
+                )
+                for a in data["answers"]
+            ]
+        except Exception:
+            logger.exception("read_whole_sheet call failed")
+            return err(ERRORS["LLM_SERVICE_ERROR"])
+
+        if {j.question_number for j in judgments} != set(range(1, 51)):
             return err(ERRORS["LLM_SERVICE_ERROR"])  # missing, duplicate, or extra questions
 
         return ok(judgments)

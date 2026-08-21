@@ -52,14 +52,45 @@ class OpenCvBubbleService:
         self._llm = llm
 
     async def detect_bubbles(self, image: bytes, test_id: int) -> Result[AnswerMap, "AppError"]:
-        warped_result = self._deskewed_canonical(image)
-        if warped_result.is_err():
-            return err(warped_result.error)
+        raw_result = self._decode_and_check_blur(image)
+        if raw_result.is_err():
+            return err(raw_result.error)
+        raw = raw_result.value
 
-        warped = warped_result.value
+        corners = self._detect_table_corners(raw)
+        if corners is None:
+            logger.info("Table border not detected — falling back to a whole-sheet AI read")
+            return await self._read_whole_sheet_fallback(image)
+
+        warped = self._deskew(raw, corners)
         ink_mask = self._threshold_to_ink_mask(warped)
         answers = self._read_bubbles(ink_mask)
         answers = await self._resolve_with_ai(warped, answers)
+        return ok(AnswerMap(answers=answers))
+
+    async def _read_whole_sheet_fallback(self, image: bytes) -> Result[AnswerMap, "AppError"]:
+        """Last resort when the table's own border can't be found — asks the AI to
+        read the raw, unaligned photo directly instead of failing outright. Every
+        answer still goes through the same confidence gate as row-level adjudication,
+        so a bad whole-sheet read surfaces as needs_review, never a silent guess."""
+        judgment_result = await self._llm.read_whole_sheet(image)
+        if judgment_result.is_err():
+            logger.warning("Whole-sheet AI fallback failed (%s)", judgment_result.error.message)
+            return err(ERRORS["BUBBLE_DETECTION_ERROR"])
+
+        answers = [
+            QuestionAnswer(
+                question_number=judgment.question_number,
+                selected_option=judgment.selected_option,
+                needs_review=judgment.confidence < AI_CONFIDENCE_THRESHOLD,
+            )
+            for judgment in sorted(judgment_result.value, key=lambda j: j.question_number)
+        ]
+        logger.info(
+            "Whole-sheet AI fallback resolved %d/%d questions confidently",
+            sum(1 for a in answers if not a.needs_review),
+            len(answers),
+        )
         return ok(AnswerMap(answers=answers))
 
     async def extract_name_region(self, image: bytes) -> Result[bytes, "AppError"]:
@@ -68,18 +99,27 @@ class OpenCvBubbleService:
         since the header's own column widths haven't been measured the way the question
         grid's have, and the printed "NAME" label gives a vision model enough to anchor
         on regardless."""
-        warped_result = self._deskewed_canonical(image)
-        if warped_result.is_err():
-            return err(warped_result.error)
+        raw_result = self._decode_and_check_blur(image)
+        if raw_result.is_err():
+            return err(raw_result.error)
+        raw = raw_result.value
 
+        corners = self._detect_table_corners(raw)
+        if corners is None:
+            # Cloud Vision locates the NAME label by its own word position, not a fixed
+            # crop — it doesn't need the sheet deskewed first, so the raw photo works
+            # directly here even when the table border couldn't be found.
+            return ok(image)
+
+        warped = self._deskew(raw, corners)
         header_bottom_px = round(template.DATA_ROWS_TOP_FRAC * template.CANON_HEIGHT_PX)
-        header = warped_result.value[:header_bottom_px, :]
+        header = warped[:header_bottom_px, :]
         ok_encoded, buffer = cv2.imencode(".png", header)
         if not ok_encoded:
             return err(ERRORS["BUBBLE_DETECTION_ERROR"])
         return ok(buffer.tobytes())
 
-    def _deskewed_canonical(self, image: bytes) -> Result[np.ndarray, "AppError"]:
+    def _decode_and_check_blur(self, image: bytes) -> Result[np.ndarray, "AppError"]:
         buffer = np.frombuffer(image, dtype=np.uint8)
         raw = cv2.imdecode(buffer, cv2.IMREAD_GRAYSCALE)
         if raw is None:
@@ -88,11 +128,7 @@ class OpenCvBubbleService:
         if self._blur_score(raw) < BLUR_VARIANCE_THRESHOLD:
             return err(ERRORS["IMAGE_TOO_BLURRY"])
 
-        corners = self._detect_table_corners(raw)
-        if corners is None:
-            return err(ERRORS["BUBBLE_DETECTION_ERROR"])
-
-        return ok(self._deskew(raw, corners))
+        return ok(raw)
 
     def _blur_score(self, gray: np.ndarray) -> float:
         return float(cv2.Laplacian(gray, cv2.CV_64F).var())

@@ -6,7 +6,10 @@ import httpx
 
 from app.config.settings import settings
 from app.utils.errors import ERRORS, AppError
+from app.utils.logger import get_logger
 from app.utils.result import Result, err, ok
+
+logger = get_logger("ocr_service")
 
 
 class IOcrService(Protocol):
@@ -46,6 +49,7 @@ class GoogleVisionOcrService:
                 data = response.json()
             annotations = data["responses"][0].get("textAnnotations", [])
         except Exception:
+            logger.exception("Cloud Vision call failed")
             return err(ERRORS["OCR_SERVICE_ERROR"])
 
         # annotations[0] is the full block of text; each entry after it is one word.
@@ -54,6 +58,7 @@ class GoogleVisionOcrService:
         ]
         name = self._name_from_words(words)
         if not name:
+            logger.warning("Cloud Vision returned text but no NAME field could be located")
             return err(ERRORS["OCR_SERVICE_ERROR"])
         return ok(name)
 
