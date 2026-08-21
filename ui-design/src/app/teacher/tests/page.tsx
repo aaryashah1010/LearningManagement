@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
-import { CheckIcon, PlusIcon } from "@/components/icons";
+import { CheckIcon, PlusIcon, SubmissionsIcon } from "@/components/icons";
 import { Button } from "@/components/ui/Button";
 import { FormField } from "@/components/ui/FormField";
 import { classesForTeacher, CURRENT_TEACHER_ID, testsForTeacher } from "@/lib/mock-data";
 
 type SetupPath = "in_app" | "uploaded_pdf";
+type UploadStatus = "uploading" | "done";
 
 export default function TeacherTestsPage() {
   const myClasses = classesForTeacher(CURRENT_TEACHER_ID);
@@ -17,12 +18,20 @@ export default function TeacherTestsPage() {
   const [title, setTitle] = useState("");
   const [setupPath, setSetupPath] = useState<SetupPath>("uploaded_pdf");
   const [justCreated, setJustCreated] = useState<string | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<Record<string, UploadStatus>>({});
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setJustCreated(title);
     setTitle("");
     setShowForm(false);
+  }
+
+  function handleUploadSheets(testId: string) {
+    setUploadStatus((prev) => ({ ...prev, [testId]: "uploading" }));
+    setTimeout(() => {
+      setUploadStatus((prev) => ({ ...prev, [testId]: "done" }));
+    }, 900);
   }
 
   return (
@@ -128,11 +137,13 @@ export default function TeacherTestsPage() {
               <th className="px-5 py-3 font-medium">Class</th>
               <th className="px-5 py-3 font-medium">Questions</th>
               <th className="px-5 py-3 font-medium">Status</th>
+              <th className="px-5 py-3 font-medium">OMR sheets</th>
             </tr>
           </thead>
           <tbody>
             {tests.map((test) => {
               const cls = myClasses.find((c) => c.id === test.classId);
+              const status = uploadStatus[test.id];
               return (
                 <tr key={test.id} className="border-b border-ink/8 last:border-0 dark:border-paper/8">
                   <td className="px-5 py-3.5">
@@ -155,6 +166,27 @@ export default function TeacherTestsPage() {
                     >
                       {test.status}
                     </span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    {test.status !== "published" ? (
+                      <span className="font-utility text-xs text-ink/35 dark:text-paper/35">
+                        Publish first
+                      </span>
+                    ) : status === "done" ? (
+                      <span className="inline-flex items-center gap-1.5 font-utility text-[11px] font-medium uppercase tracking-wide text-chart-green">
+                        <CheckIcon className="h-3.5 w-3.5" /> Uploaded
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleUploadSheets(test.id)}
+                        disabled={status === "uploading"}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-ink/15 px-2.5 py-1.5 text-xs font-medium text-ink/70 transition-colors hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-50 dark:border-paper/20 dark:text-paper/70 dark:hover:bg-paper/10"
+                      >
+                        <SubmissionsIcon className="h-3.5 w-3.5" />
+                        {status === "uploading" ? "Uploading…" : "Upload sheets"}
+                      </button>
+                    )}
                   </td>
                 </tr>
               );

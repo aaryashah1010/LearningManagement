@@ -1,7 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { SubmissionReview } from "@/components/teacher/SubmissionReview";
-import { classById, CURRENT_TEACHER_ID, submissionById, testById } from "@/lib/mock-data";
+import {
+  classById,
+  CURRENT_TEACHER_ID,
+  submissionById,
+  submissionStudentName,
+  testById,
+} from "@/lib/mock-data";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -10,7 +16,7 @@ interface PageProps {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { id } = await params;
   const submission = submissionById(id);
-  return { title: submission ? `${submission.studentName}'s submission` : "Submission" };
+  return { title: submission ? `${submissionStudentName(submission)}'s submission` : "Submission" };
 }
 
 export default async function TeacherSubmissionDetailPage({ params }: PageProps) {

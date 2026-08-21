@@ -1,12 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { TopicTree } from "@/components/charts/TopicTree";
+import { TrendChart } from "@/components/charts/TrendChart";
 import {
   CLASS_WEAK_TOPICS,
   classesForTeacher,
   CURRENT_TEACHER_ID,
   flattenTopicLeaves,
+  TEST_HISTORY,
   topicPathTo,
   type TopicNode,
 } from "@/lib/mock-data";
@@ -49,6 +52,7 @@ export default function TeacherReportsPage() {
   const topics = CLASS_WEAK_TOPICS[classId] ?? [];
   const selectedClass = myClasses.find((c) => c.id === classId);
   const weakest = computeWeakest(topics);
+  const cumulative = TEST_HISTORY[classId];
 
   return (
     <div className="flex flex-col gap-8">
@@ -112,6 +116,54 @@ export default function TeacherReportsPage() {
             <p className="font-utility text-[11px] text-ink/45 dark:text-paper/45">
               {weakest.total} students total in {selectedClass?.name}
             </p>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.3fr_1fr]">
+        {cumulative && (
+          <TrendChart
+            title={`${selectedClass?.name} · cumulative report`}
+            periodLabel="4 unit tests this subject"
+            unitLabel="class average"
+            data={cumulative}
+            valueSuffix="%"
+          />
+        )}
+
+        {selectedClass && (
+          <div className="flex flex-col gap-4 rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate">
+            <div className="flex items-baseline justify-between">
+              <h3 className="font-display text-lg text-ink dark:text-paper">Students</h3>
+              <p className="text-sm text-ink/50 dark:text-paper/50">
+                {selectedClass.roster.length} in class
+              </p>
+            </div>
+            <ul className="flex flex-col divide-y divide-ink/8 dark:divide-paper/8">
+              {selectedClass.roster.map((student) => {
+                const history = TEST_HISTORY[student.id];
+                const latest = history?.at(-1);
+                return (
+                  <li key={student.id}>
+                    <Link
+                      href={`/teacher/students/${student.id}/report`}
+                      className="flex items-center justify-between gap-3 py-2.5 text-sm hover:text-correct"
+                    >
+                      <span className="font-medium text-ink dark:text-paper">{student.name}</span>
+                      {latest ? (
+                        <span className="font-utility text-xs font-semibold text-chart-green">
+                          {latest.value}%
+                        </span>
+                      ) : (
+                        <span className="font-utility text-[11px] text-ink/40 dark:text-paper/40">
+                          No report yet
+                        </span>
+                      )}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         )}
       </div>

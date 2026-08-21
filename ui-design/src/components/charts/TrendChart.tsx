@@ -134,7 +134,7 @@ export function TrendChart({
               key={d.label}
               x={xAt(i)}
               y={HEIGHT - 6}
-              textAnchor="middle"
+              textAnchor={i === 0 ? "start" : i === data.length - 1 ? "end" : "middle"}
               className="fill-ink/45 font-utility text-[10px] dark:fill-paper/45"
             >
               {d.label}

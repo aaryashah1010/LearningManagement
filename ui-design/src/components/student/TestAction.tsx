@@ -1,8 +1,4 @@
-"use client";
-
-import { useState } from "react";
-import { CheckIcon, SubmissionsIcon } from "@/components/icons";
-import { Button } from "@/components/ui/Button";
+import { SubmissionsIcon } from "@/components/icons";
 import { formatDate } from "@/lib/format-date";
 import type { MockSubmission, MockTest } from "@/lib/mock-data";
 
@@ -13,9 +9,6 @@ export function TestAction({
   test: MockTest;
   submission: MockSubmission | null;
 }) {
-  const [uploading, setUploading] = useState(false);
-  const [justSubmitted, setJustSubmitted] = useState(false);
-
   if (submission) {
     const correctCount = submission.answers.filter(
       (a) => a.studentAnswer === a.correctAnswer
@@ -77,29 +70,6 @@ export function TestAction({
     );
   }
 
-  if (justSubmitted) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-ink/15 py-16 text-center dark:border-paper/15">
-        <CheckIcon className="h-8 w-8 text-chart-green" />
-        <div>
-          <p className="font-display text-lg text-ink dark:text-paper">Submitted</p>
-          <p className="mt-1 max-w-sm text-sm text-ink/55 dark:text-paper/55">
-            Your teacher confirms any low-confidence bubble reads before your score
-            is final — check back soon.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  function handleUpload() {
-    setUploading(true);
-    setTimeout(() => {
-      setUploading(false);
-      setJustSubmitted(true);
-    }, 900);
-  }
-
   return (
     <div className="flex flex-col gap-8">
       <div>
@@ -112,17 +82,12 @@ export function TestAction({
       <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-ink/15 py-16 text-center dark:border-paper/15">
         <SubmissionsIcon className="h-8 w-8 text-ink/30 dark:text-paper/30" />
         <div>
-          <p className="font-display text-lg text-ink dark:text-paper">
-            Upload your OMR sheet
-          </p>
+          <p className="font-display text-lg text-ink dark:text-paper">Not graded yet</p>
           <p className="mt-1 max-w-sm text-sm text-ink/55 dark:text-paper/55">
-            A photo of your completed answer sheet — any layout works, your login is
-            how we know it&rsquo;s yours.
+            Your teacher uploads the whole class&rsquo;s answer sheets together —
+            check back once they have.
           </p>
         </div>
-        <Button onClick={handleUpload} disabled={uploading}>
-          {uploading ? "Uploading…" : "Upload OMR sheet"}
-        </Button>
       </div>
     </div>
   );

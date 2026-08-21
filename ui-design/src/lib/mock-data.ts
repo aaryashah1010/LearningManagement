@@ -135,7 +135,6 @@ export interface MockSubmission {
   id: string;
   testId: string;
   studentId: string;
-  studentName: string;
   score: number;
   submittedAt: string;
   answers: MockAnswer[];
@@ -146,7 +145,6 @@ export const MOCK_SUBMISSIONS: MockSubmission[] = [
     id: "sub-1",
     testId: "test-1",
     studentId: "c1-s1",
-    studentName: "Ishaan Kapoor",
     score: 90,
     submittedAt: "2026-08-19T09:12:00",
     answers: [
@@ -160,7 +158,6 @@ export const MOCK_SUBMISSIONS: MockSubmission[] = [
     id: "sub-2",
     testId: "test-1",
     studentId: "c1-s2",
-    studentName: "Diya Reddy",
     score: 65,
     submittedAt: "2026-08-19T09:31:00",
     answers: [
@@ -174,7 +171,6 @@ export const MOCK_SUBMISSIONS: MockSubmission[] = [
     id: "sub-3",
     testId: "test-1",
     studentId: "c1-s3",
-    studentName: "Vihaan Joshi",
     score: 75,
     submittedAt: "2026-08-19T10:02:00",
     answers: [
@@ -192,6 +188,15 @@ export function submissionsForTest(testId: string): MockSubmission[] {
 
 export function submissionById(submissionId: string): MockSubmission | undefined {
   return MOCK_SUBMISSIONS.find((s) => s.id === submissionId);
+}
+
+// Derived from the roster, never stored redundantly on the submission itself
+// — a hardcoded copy is exactly what let this drift out of sync with the
+// roster in the first place.
+export function submissionStudentName(submission: MockSubmission): string {
+  const classId = testById(submission.testId)?.classId;
+  const name = classId ? studentDisplayName(classId, submission.studentId) : undefined;
+  return name ?? "Unknown student";
 }
 
 export function submissionForStudentAndTest(
@@ -266,6 +271,18 @@ export const CLASS_WEAK_TOPICS: Record<string, TopicNode[]> = {
 // A student's own report — same tree shape as the class-wide one, but rolled
 // up from just their own result rows (curriculum-taxonomy.md § Data Model).
 export const STUDENT_WEAK_TOPICS: Record<string, TopicNode[]> = {
+  "c1-s1": [
+    { name: "Algebra", accuracy: 92 },
+    {
+      name: "Geometry",
+      accuracy: 88,
+      children: [
+        { name: "Triangles", accuracy: 90 },
+        { name: "Circles", accuracy: 85 },
+      ],
+    },
+    { name: "Statistics", accuracy: 94 },
+  ],
   "c1-s2": [
     { name: "Algebra", accuracy: 82 },
     {
@@ -285,6 +302,18 @@ export const STUDENT_WEAK_TOPICS: Record<string, TopicNode[]> = {
     },
     { name: "Statistics", accuracy: 88 },
   ],
+  "c1-s3": [
+    { name: "Algebra", accuracy: 70 },
+    {
+      name: "Geometry",
+      accuracy: 66,
+      children: [
+        { name: "Triangles", accuracy: 72 },
+        { name: "Circles", accuracy: 61 },
+      ],
+    },
+    { name: "Statistics", accuracy: 79 },
+  ],
 };
 
 // Historical accuracy for a student's weakest node, test over test — the
@@ -297,3 +326,53 @@ export const STUDENT_TOPIC_HISTORY: Record<string, { label: string; value: numbe
     { label: "Test 4", value: 74 },
   ],
 };
+
+// --- Cumulative report — overall score across a subject's 4 unit tests -----
+// One entry per class (the class average) and per student (their own
+// trajectory) — same shape, different scope, both "the cumulative report."
+// Each student's Unit Test 4 value matches their actual score in
+// MOCK_SUBMISSIONS for test-1 so the two views stay consistent.
+export const TEST_HISTORY: Record<string, { label: string; value: number }[]> = {
+  c1: [
+    { label: "Unit Test 1", value: 52 },
+    { label: "Unit Test 2", value: 58 },
+    { label: "Unit Test 3", value: 61 },
+    { label: "Unit Test 4", value: 65 },
+  ],
+  "c1-s1": [
+    { label: "Unit Test 1", value: 70 },
+    { label: "Unit Test 2", value: 78 },
+    { label: "Unit Test 3", value: 85 },
+    { label: "Unit Test 4", value: 90 },
+  ],
+  "c1-s2": [
+    { label: "Unit Test 1", value: 50 },
+    { label: "Unit Test 2", value: 58 },
+    { label: "Unit Test 3", value: 62 },
+    { label: "Unit Test 4", value: 65 },
+  ],
+  "c1-s3": [
+    { label: "Unit Test 1", value: 60 },
+    { label: "Unit Test 2", value: 68 },
+    { label: "Unit Test 3", value: 71 },
+    { label: "Unit Test 4", value: 75 },
+  ],
+};
+
+export function studentDisplayName(classId: string, studentId: string): string | undefined {
+  return classById(classId)?.roster.find((s) => s.id === studentId)?.name;
+}
+
+// A teacher only ever looks up a student through one of their own classes'
+// rosters — same "fetch, compare, don't leak existence" pattern used
+// elsewhere (accounts-and-roster.md § Tenancy Model).
+export function findStudentInTeacherClasses(
+  teacherId: string,
+  studentId: string
+): { student: MockStudent; cls: MockClass } | undefined {
+  for (const cls of classesForTeacher(teacherId)) {
+    const student = cls.roster.find((s) => s.id === studentId);
+    if (student) return { student, cls };
+  }
+  return undefined;
+}

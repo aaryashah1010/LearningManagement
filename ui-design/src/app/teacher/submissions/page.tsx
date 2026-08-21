@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CURRENT_TEACHER_ID, MOCK_SUBMISSIONS, testById, testsForTeacher } from "@/lib/mock-data";
+import {
+  CURRENT_TEACHER_ID,
+  MOCK_SUBMISSIONS,
+  submissionStudentName,
+  testById,
+  testsForTeacher,
+} from "@/lib/mock-data";
 
 export const metadata: Metadata = { title: "Submissions" };
 
@@ -39,7 +45,7 @@ export default function TeacherSubmissionsPage() {
                       href={`/teacher/submissions/${submission.id}`}
                       className="font-medium text-ink hover:text-correct dark:text-paper"
                     >
-                      {submission.studentName}
+                      {submissionStudentName(submission)}
                     </Link>
                   </td>
                   <td className="px-5 py-3.5 text-ink/60 dark:text-paper/60">{test?.title}</td>

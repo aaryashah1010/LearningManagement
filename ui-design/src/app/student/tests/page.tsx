@@ -15,8 +15,9 @@ export default function StudentTestsPage() {
   return (
     <div className="flex flex-col gap-8">
       <p className="max-w-xl text-sm text-ink/60 dark:text-paper/60">
-        Tests your teacher has published. Upload a photo of your completed OMR
-        sheet — any layout works.
+        Tests your teacher has published. Your teacher uploads the whole
+        class&rsquo;s answer sheets together, so results appear here once
+        they have.
       </p>
 
       <ul className="flex flex-col divide-y divide-ink/8 rounded-2xl border border-ink/10 dark:divide-paper/8 dark:border-paper/10">
@@ -40,7 +41,7 @@ export default function StudentTestsPage() {
                   </span>
                 ) : (
                   <span className="font-utility text-[11px] font-medium uppercase tracking-wide text-chart-amber">
-                    Take test
+                    Not graded yet
                   </span>
                 )}
               </Link>

@@ -32,11 +32,11 @@ export default function StudentDashboardPage() {
     <div className="flex flex-col gap-8">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatTile
-          label="Tests to take"
+          label="Awaiting grading"
           value={String(pendingTests.length)}
           status={pendingTests.length > 0 ? "attention" : "good"}
           delta={{
-            text: pendingTests.length > 0 ? "Waiting on your OMR sheet" : "All caught up",
+            text: pendingTests.length > 0 ? "Waiting on your teacher" : "All caught up",
             direction: pendingTests.length > 0 ? "down" : "flat",
           }}
           icon={<TestsIcon className="h-4 w-4" />}
@@ -79,7 +79,7 @@ export default function StudentDashboardPage() {
                       </span>
                     ) : (
                       <span className="font-utility text-[11px] font-medium uppercase tracking-wide text-chart-amber">
-                        Take test
+                        Not graded yet
                       </span>
                     )}
                   </Link>

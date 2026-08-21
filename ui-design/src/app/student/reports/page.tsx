@@ -38,7 +38,7 @@ export default function StudentReportsPage() {
           <TrendChart
             title={`${weakestPath.split(" → ").at(-1)} accuracy`}
             periodLabel="Last 4 tests"
-            unitLabel="% accuracy"
+            unitLabel="accuracy"
             data={history}
             valueSuffix="%"
           />

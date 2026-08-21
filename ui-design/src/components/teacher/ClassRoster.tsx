@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import type { MockClass, MockStudent } from "@/lib/mock-data";
@@ -46,7 +47,12 @@ export function ClassRoster({
           <li key={student.id} className="flex flex-col gap-2 py-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="font-medium text-ink dark:text-paper">{student.name}</p>
+                <Link
+                  href={`/teacher/students/${student.id}/report`}
+                  className="font-medium text-ink hover:text-correct hover:underline dark:text-paper"
+                >
+                  {student.name}
+                </Link>
                 <p className="font-utility text-xs text-ink/45 dark:text-paper/45">
                   {student.contact}
                 </p>

@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
-import type { MockAnswer, MockSubmission, QuestionOption } from "@/lib/mock-data";
+import { submissionStudentName, type MockAnswer, type MockSubmission, type QuestionOption } from "@/lib/mock-data";
 
 const OPTIONS: QuestionOption[] = ["A", "B", "C", "D"];
 
@@ -40,9 +41,17 @@ export function SubmissionReview({
     <div className="flex flex-col gap-8">
       <div>
         <p className="text-sm text-ink/55 dark:text-paper/55">{testTitle}</p>
-        <h2 className="font-display text-2xl text-ink dark:text-paper">
-          {submission.studentName}
-        </h2>
+        <div className="flex items-center gap-3">
+          <h2 className="font-display text-2xl text-ink dark:text-paper">
+            {submissionStudentName(submission)}
+          </h2>
+          <Link
+            href={`/teacher/students/${submission.studentId}/report`}
+            className="text-sm font-medium text-correct hover:underline"
+          >
+            Full report →
+          </Link>
+        </div>
         <p className="mt-1 text-sm text-ink/55 dark:text-paper/55">
           {correctCount}/{answers.length} correct ·{" "}
           {remaining > 0 ? `${remaining} still flagged` : "all confirmed"}
