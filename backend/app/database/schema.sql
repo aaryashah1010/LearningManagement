@@ -129,6 +129,9 @@ CREATE TABLE tests (
 -- MCQ only — no question_type discriminator, no model_answer/keyword_key.
 -- Subjective grading is its own future PR; these come back together then,
 -- not as unused columns kept around now. See § Design Decisions.
+-- option_a-d and image_url are nullable: the manual-entry path (BulkQuestionsRequest)
+-- only ever populated question_text/correct_option; the question-paper PDF upload path
+-- populates all of them, giving a self-contained stored copy of the paper.
 CREATE TABLE questions (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     test_id BIGINT UNSIGNED NOT NULL,
@@ -136,6 +139,11 @@ CREATE TABLE questions (
     question_text TEXT NOT NULL,
     max_marks DECIMAL(6,2) NOT NULL DEFAULT 1.00,
     correct_option VARCHAR(5) NOT NULL COMMENT 'A/B/C/D',
+    option_a TEXT NULL,
+    option_b TEXT NULL,
+    option_c TEXT NULL,
+    option_d TEXT NULL,
+    image_url VARCHAR(500) NULL,
     FOREIGN KEY (test_id) REFERENCES tests(id) ON DELETE CASCADE,
     UNIQUE KEY uq_test_question_number (test_id, question_number),
     INDEX idx_questions_test (test_id)

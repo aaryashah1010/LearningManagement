@@ -10,6 +10,11 @@ class Question(BaseModel):
     question_text: str
     max_marks: float
     correct_option: str
+    option_a: str | None
+    option_b: str | None
+    option_c: str | None
+    option_d: str | None
+    image_url: str | None
 
 
 class CreateQuestionData(BaseModel):
@@ -17,6 +22,11 @@ class CreateQuestionData(BaseModel):
     question_text: str
     correct_option: str
     max_marks: float = 1.00
+    option_a: str | None = None
+    option_b: str | None = None
+    option_c: str | None = None
+    option_d: str | None = None
+    image_url: str | None = None
 
     @field_validator("correct_option")
     @classmethod

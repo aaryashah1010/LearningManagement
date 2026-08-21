@@ -83,9 +83,21 @@ class TestRepositoryImpl(ITestRepository):
                     try:
                         cursor.execute(
                             "INSERT INTO questions "
-                            "(test_id, question_number, question_text, correct_option, max_marks) "
-                            "VALUES (%s, %s, %s, %s, %s)",
-                            (test_id, q.question_number, q.question_text, q.correct_option, q.max_marks),
+                            "(test_id, question_number, question_text, correct_option, max_marks, "
+                            "option_a, option_b, option_c, option_d, image_url) "
+                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                            (
+                                test_id,
+                                q.question_number,
+                                q.question_text,
+                                q.correct_option,
+                                q.max_marks,
+                                q.option_a,
+                                q.option_b,
+                                q.option_c,
+                                q.option_d,
+                                q.image_url,
+                            ),
                         )
                     except IntegrityError as exc:
                         raise _DuplicateQuestionNumber from exc

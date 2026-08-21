@@ -1,13 +1,18 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, UploadFile
 from fastapi.responses import JSONResponse
 
 from app.middleware.auth import get_current_teacher_or_admin
 from app.models.llm import QuestionToMap
-from app.models.question import BulkQuestionsRequest, SetQuestionNodeRequest
+from app.models.question import BulkQuestionsRequest, CreateQuestionData, SetQuestionNodeRequest
 from app.models.test import CreateTestData
 from app.repositories.curriculum_node_repository import CurriculumNodeRepository
 from app.repositories.test_repository import TestRepository
 from app.services.llm.llm_service import ILlmService, get_llm_service
+from app.services.question_paper.question_paper_service import (
+    IQuestionPaperService,
+    get_question_paper_service,
+)
+from app.services.storage.storage_service import IStorageService, get_storage_service
 from app.types.token import TokenData
 from app.utils.errors import ERRORS
 from app.utils.logger import get_logger
@@ -32,9 +37,17 @@ def _ensure_test_scoped(test_id: int, current_user: TokenData):
     return test_result
 
 
-async def _auto_map_questions(test_id: int, book_id: int, llm: ILlmService) -> None:
+async def _auto_map_questions(
+    test_id: int,
+    book_id: int,
+    llm: ILlmService,
+    images_by_question_number: dict[int, bytes] | None = None,
+) -> None:
     """Best-effort — question creation already succeeded regardless of this outcome.
-    A teacher can always map (or fix) a question's node manually via the PUT endpoint."""
+    A teacher can always map (or fix) a question's node manually via the PUT endpoint.
+    images_by_question_number carries a question's diagram, if it has one — the stem
+    alone can be too vague to classify without seeing it (e.g. "study the given ray
+    diagram and select the correct statement" names no topic in words at all)."""
     taxonomy_result = CurriculumNodeRepository.list_flat(book_id)
     if taxonomy_result.is_err() or not taxonomy_result.value:
         return
@@ -42,8 +55,14 @@ async def _auto_map_questions(test_id: int, book_id: int, llm: ILlmService) -> N
     if questions_result.is_err() or not questions_result.value:
         return
 
+    images_by_question_number = images_by_question_number or {}
     questions = [
-        QuestionToMap(question_id=q.id, question_text=q.question_text) for q in questions_result.value
+        QuestionToMap(
+            question_id=q.id,
+            question_text=q.question_text,
+            image=images_by_question_number.get(q.question_number),
+        )
+        for q in questions_result.value
     ]
     mapping_result = await llm.map_questions_to_nodes(questions, taxonomy_result.value)
     if mapping_result.is_err():
@@ -120,6 +139,86 @@ async def create_questions_bulk(
         status_code=201,
         content=success_response(
             [q.model_dump(mode="json") for q in result.value], "Questions created successfully"
+        ),
+    )
+
+
+@router.post("/api/tests/{test_id}/questions/upload")
+async def upload_question_paper(
+    test_id: int,
+    file: UploadFile,
+    current_user: TokenData = Depends(get_current_teacher_or_admin),
+    llm: ILlmService = Depends(get_llm_service),
+    storage: IStorageService = Depends(get_storage_service),
+    question_paper: IQuestionPaperService = Depends(get_question_paper_service),
+) -> JSONResponse:
+    scoped = _ensure_test_scoped(test_id, current_user)
+    if scoped.is_err():
+        return _err(scoped.error)
+    test = scoped.value
+    if test.setup_path != "uploaded_pdf":
+        return _err(ERRORS["TEST_SETUP_PATH_MISMATCH"])
+    if test.published_at is not None:
+        return _err(ERRORS["TEST_ALREADY_PUBLISHED"])
+
+    if file.content_type != "application/pdf":
+        return _err(ERRORS["INVALID_FILE_TYPE"])
+    pdf_bytes = await file.read()
+
+    parsed_result = question_paper.parse(pdf_bytes)
+    if parsed_result.is_err():
+        return _err(parsed_result.error)
+    parsed = parsed_result.value
+
+    questions_to_create: list[CreateQuestionData] = []
+    images_by_question_number: dict[int, bytes] = {}
+    for question in parsed.questions:
+        image_url = None
+        if question.image is not None:
+            images_by_question_number[question.question_number] = question.image
+            key = f"questions/test-{test_id}/q{question.question_number}.png"
+            upload_result = await storage.upload(question.image, key, "image/png")
+            if upload_result.is_ok():
+                image_url = upload_result.value
+            else:
+                logger.warning(
+                    "Failed to upload image for test %s question %s: %s",
+                    test_id,
+                    question.question_number,
+                    upload_result.error.message,
+                )
+        questions_to_create.append(
+            CreateQuestionData(
+                question_number=question.question_number,
+                question_text=question.question_text,
+                correct_option=question.correct_option,
+                option_a=question.option_a,
+                option_b=question.option_b,
+                option_c=question.option_c,
+                option_d=question.option_d,
+                image_url=image_url,
+            )
+        )
+
+    result = TestRepository.create_questions_bulk(test_id, questions_to_create)
+    if result.is_err():
+        return _err(result.error)
+
+    await _auto_map_questions(test_id, test.book_id, llm, images_by_question_number)
+
+    return JSONResponse(
+        status_code=201,
+        content=success_response(
+            {
+                "questions": [q.model_dump(mode="json") for q in result.value],
+                "unparsed_question_numbers": parsed.unparsed_question_numbers,
+            },
+            "Question paper uploaded"
+            + (
+                f" — {len(parsed.unparsed_question_numbers)} question(s) need manual entry"
+                if parsed.unparsed_question_numbers
+                else ""
+            ),
         ),
     )
 

@@ -181,6 +181,27 @@ numbers already establish that before the LLM ever sees the data.
   the fixed `ENUM` by one value keeps lookups/rollups as plain joins — open-ended depth
   (dropping the `ENUM`, `WITH RECURSIVE`, cycle-safety checks) is the fallback if that's
   not enough, but neither is needed now.
+
+  **Test for whether a Subtopic needs splitting further** (came up entering Science
+  Class 10, "Reproduction in Human Beings"): split when the book itself draws a boundary
+  a test question could sit entirely on one side of — content that's independently
+  masterable and independently weak-flaggable, like Male vs. Female Reproductive System
+  (separate organ systems, own heading in the book). Don't split just because a
+  paragraph could be cut into smaller pieces — e.g. "Reproductive Health" covers STIs,
+  contraception, and population in one continuous passage with no such boundary; a
+  question could easily span two of those, and a student isn't independently
+  weak/strong in one vs. another the way they can be for Male vs. Female. Splitting
+  there wouldn't sharpen a report, just multiply nodes for content that isn't
+  separately testable. This test still resolves inside 3 levels — it governs how many
+  Subtopics a Topic gets, not whether to add a 4th level.
+
+  **When that stops being enough — i.e. when a genuine sub-subtopic case shows up:** a
+  chapter where, even after applying the test above, a single Subtopic still contains
+  two or more parts that are each independently testable *and* the book itself marks a
+  real boundary between them (a numbered or lettered sub-heading, not just a paragraph
+  break) — at a grain finer than any existing Subtopic split has needed. If that
+  happens, add the `sub_subtopic` value to the `level` ENUM (see above) rather than
+  forcing the split sideways into more Topics or cramming it into one Subtopic.
 - **Domain grouping above Chapter** (e.g. "Geometry" spanning Circles, Triangles,
   Coordinate Geometry) — raised by a teammate's curriculum hierarchy, not yet resolved
   whether it's a real structural need or just a descriptive label. If real, the

@@ -31,6 +31,10 @@ class Settings(BaseSettings):
 
     BUBBLE_DETECTION_PROVIDER: Literal["opencv"] = "opencv"
 
+    # Question-paper PDF parsing (teacher-uploaded que-ans papers) — reads the PDF's own
+    # text layer for now; swappable for an OCR-based provider later for scanned papers.
+    QUESTION_PAPER_PARSER_PROVIDER: Literal["text_layer"] = "text_layer"
+
     # Handwriting OCR (e.g. the submission header's NAME field) — Cloud Vision for now,
     # swappable for another provider later without touching any caller of IOcrService.
     OCR_PROVIDER: Literal["google_vision"] = "google_vision"

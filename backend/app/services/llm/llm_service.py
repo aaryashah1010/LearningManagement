@@ -104,6 +104,18 @@ _WHOLE_SHEET_SYSTEM_PROMPT = (
 # same request with a short prompt returns normally. See omr-extraction-strategy.md.
 
 
+def _parse_json_content(content: str) -> dict:
+    # Used only where response_format=json_object is skipped (long prompt + image on
+    # NVIDIA NIM hangs — see above). The prompt still asks for JSON-only, but without
+    # the enforced mode a model may wrap it in a code fence anyway.
+    text = content.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text
+        if text.endswith("```"):
+            text = text.rsplit("```", 1)[0]
+    return json.loads(text)
+
+
 class OpenAiCompatibleLlmService:
     """Calls any provider exposing an OpenAI-compatible chat completions endpoint (NVIDIA,
     Gemini, OpenAI itself) — which base_url/model/key is used comes entirely from config,
@@ -118,21 +130,36 @@ class OpenAiCompatibleLlmService:
         if not questions or not candidates:
             return err(ERRORS["LLM_SERVICE_ERROR"])
 
-        question_block = "\n".join(f"{q.question_id}: {q.question_text}" for q in questions)
+        text_only = [q for q in questions if q.image is None]
+        question_block = "\n".join(f"{q.question_id}: {q.question_text}" for q in text_only)
         options = "\n".join(f"{c.id}: {c.path}" for c in candidates)
         user_prompt = f"Questions:\n{question_block}\n\nCandidate topics (id: path):\n{options}"
+
+        content: list[dict] = [{"type": "text", "text": user_prompt}]
+        for q in questions:
+            if q.image is None:
+                continue
+            image_b64 = base64.b64encode(q.image).decode()
+            label = f"Question {q.question_id} (has a diagram, see image): {q.question_text}"
+            content.append({"type": "text", "text": label})
+            content.append(
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}}
+            )
+        has_images = any(q.image is not None for q in questions)
 
         try:
             response = await self._client.chat.completions.create(
                 model=settings.LLM_MODEL,
                 messages=[
                     {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
+                    {"role": "user", "content": content},
                 ],
-                response_format={"type": "json_object"},
+                # This prompt is long — skip strict JSON mode once an image joins it (see
+                # _parse_json_content above for why).
+                **({} if has_images else {"response_format": {"type": "json_object"}}),
                 temperature=0,
             )
-            data = json.loads(response.choices[0].message.content)
+            data = _parse_json_content(response.choices[0].message.content)
             mappings = [
                 NodeMapping(
                     question_id=int(m["question_id"]),
