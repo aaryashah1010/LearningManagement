@@ -1,246 +1,243 @@
 # OMR Answer Extraction Strategy — Answer Key & Student Sheets
 
-> Implements the extraction side of `ICvOcrService` (`backend-guide.md` § Service Layer).
-> Resolves the tension in `../omr-grading.md` (current version) between "any sheet layout
-> must work, no calibration step" and the original cost principle "grading a submission
-> should be free CV, not per-student AI."
+> Implements the extraction side of `IBubbleService` (`backend-guide.md` § Service Layer).
+> Supersedes the earlier AI-vision-per-sheet design that assumed an arbitrary,
+> never-seen tuition sheet layout — see § Why this changed below.
 
-## v1 decision: AI-vision reads every sheet, no caching, no registration
+## v2 decision: one fixed sheet template, pure OpenCV, in-app guided capture, no AI
 
-Two designs were weighed against each other for this doc:
+The platform now standardizes on **a single OMR sheet template**, rather than
+accepting whatever OMR format each tuition already uses. Every test uses the same
+physical layout — same bubble grid geometry, same dimensions. That single fact
+removes the entire problem the previous AI-vision design existed to solve.
 
-- **A cached-template approach** — pure-CV auto-detects a test's bubble grid from its
-  first sheet, caches it, and reuses it cheaply for every later submission via image
-  registration (feature-matching + homography). Cheapest after the first sheet, but the
-  most engineering: registration reliability and structural sanity-check thresholds are
-  both unproven, and it's the most code to build (three fallback paths, a template cache,
-  a homography step).
-- **AI-vision reads every submission directly, independently, no template at all** —
-  explicitly allowed as a first-class option in `../omr-grading.md` (not just a lesser
-  fallback). Simplest by far: one code path, nothing to cache, nothing to align, no
-  registration-reliability question exists because there's nothing to register against.
-  Cost is a per-student AI-vision call — small and bounded for a typical class size, not
-  a per-test one-time cost, but not the runaway cost a naive reading of "AI cost" might
-  suggest either.
+The template is the pre-existing "ATTITUDE CLASSES FOR EXCELLENCE - OMR" sheet — a
+third-party design this project adopted as-is, not one it authored. That means there's
+no print spec to read exact dimensions from; geometry below is measured from a scanned
+sample sheet, not laid out from a CAD source — see § The template.
 
-**v1 uses the second option.** Given how much of the cached-template approach is
-unvalidated, and how fully the simple approach satisfies every stated MVP requirement,
-building the complex, cost-optimized version before validating the simple one even works
-is optimizing a cost that hasn't been shown to be a real problem yet. The cached-template
-design is kept below as a documented **future optimization** — the idea isn't lost, it's
-just not what v1 builds.
+## Why this changed
 
-## Why not pure OpenCV, with no AI at all?
+The earlier design (AI-vision reads every sheet directly, no template) was built around
+a specific constraint: **"any sheet layout must work, no calibration step"** — a tuition
+keeps using its own existing OMR sheet, and the system has to read it without ever
+having seen its layout before. Under that constraint, discovering bubble positions is a
+genuinely hard, unbounded visual-inference problem (see the old reasoning: no embedded
+structure in a photo, real phone-photo noise, every tuition's sheet is a different
+design), which is why pure OpenCV was rejected in favor of AI-vision.
 
-Worth answering directly, since it's a reasonable question to ask. **Fill detection**
-— given a known bubble position, measuring whether it's filled — is genuinely simple,
-reliable, decades-old technology. Nobody disputes that part; that's exactly the part
-described as "easy, like reading structured text out of a PDF" elsewhere in this project's
-docs. The part that's hard, and the actual reason v1 doesn't use pure OpenCV, is
-**discovering where the bubbles are on a sheet the system has never seen before, with
-no calibration step:**
+That constraint no longer holds. **The sheet layout is fixed and known in advance** —
+there's exactly one template, so bubble positions aren't discovered per sheet, they're
+read from a single config once and reused for every submission, every test, every
+student. This is the same idea the old doc's deferred "Future Optimization" section
+described as a cached template — the only difference is the template doesn't need to be
+*learned* from a first sheet, because it's fixed in advance.
 
-1. **A photographed sheet has no embedded structure, unlike the NCERT PDFs this project
-   also processes.** A PDF with a real text layer already has character positions baked
-   in — extraction is a lookup, not an inference. A photo of a bubble sheet is just
-   pixels; nothing in the file says "there's a bubble here." Every bubble position has to
-   be inferred visually, which is a fundamentally different, harder category of problem.
-2. **Real phone photos aren't clean, controlled input.** Variable lighting, shadows,
-   glare, skew, paper creases, blur — all of these degrade classical contour detection.
-   A shadow can look like a filled bubble; a crease can break a circle's outline.
-3. **Every tuition's sheet is a different design.** Different bubble sizes, sometimes
-   squares instead of circles, different column layouts (a common one: Q1–25 left column,
-   Q26–50 right column), decorative elements that also look circular. Grouping detected
-   marks into the *correct question and option* — not just "is this a circle" but "which
-   circle is Q7's Option C" — is a geometry/clustering problem that classical CV solves
-   well for clean, regular grids, but isn't guaranteed to solve for an arbitrary,
-   never-seen layout.
+## The template
 
-**The honest framing, not an assertion either way:** "pure OpenCV reliably reads any
-previously-unseen sheet, no calibration, at production accuracy" is an empirically
-testable claim, not a settled fact — the real test would be running CV-only auto-detection
-against a diverse batch of real tuitions' actual sheets and measuring the failure rate.
-That's exactly why this doc doesn't bet v1 on it: the CV-first/cached-template design
-below (§ Future Optimization) is that same idea, kept as something to build **after**
-someone actually validates it, not before.
+One sheet design ("ATTITUDE CLASSES FOR EXCELLENCE - OMR"), used for every test
+regardless of subject/class. Geometry lives in `app/services/omr_template.py`, expressed
+as **fractions of the detected outer table border** rather than absolute mm — this
+project doesn't control the sheet's print dimensions (it's a third-party design), only
+its now-known row/column structure:
 
-## Provider abstraction — this can change without touching any caller
+| Zone | Spec |
+|---|---|
+| Title row | sheet title, no data read from it |
+| NAME / STD row, SUB / DATE row | handwritten, **not read by this pipeline** — student identity comes from the app session the submission was uploaded under, not OCR |
+| Header row | printed A/B/C/D column labels, no data read from it |
+| Question grid | one continuous table, two equal-width blocks side by side |
+| Rows | 25 per block, evenly spaced — 50 questions total (Q1-25 left, Q26-50 right) |
+| Columns | 5 equal-width columns per block: question-number label, then A/B/C/D |
 
-`ICvOcrService` (§ Interface shape below) is the reason this decision isn't a one-way
-door. Whether extraction is "AI-vision reads every sheet" (v1), "pure OpenCV with a
-cached template" (§ Future Optimization), or something else entirely, is an
-implementation detail of one class behind that interface — same pattern as `ILlmService`
-in `backend-guide.md` § Service Layer & Provider Abstraction. Routers, the submission
-pipeline, and every other caller only ever depend on
-`ICvOcrService`'s method signatures, never on a concrete implementation — swapping the
-underlying approach is a new implementation class plus a config value, with zero changes
-to any code that calls it.
+There are **no printed corner fiducial markers** on this sheet (unlike a project-owned
+design would have) — deskewing instead detects the sheet's own outer table border: the
+largest quadrilateral contour in the photo, the same technique a generic document
+scanner uses to locate a page. See § How it works below.
 
-## Input format
+**Bubble geometry is a single static config** (`omr_template.py`) — not per-test, not
+learned, not cached from a first sheet. Question count is a fixed maximum (50); tests
+with fewer questions simply leave the remaining rows blank. The row/column fractions
+were measured off a scanned sample sheet (`refrence/student-omr.pdf`), not derived from
+a print spec — like the fill-ratio thresholds below, they're illustrative until
+validated against more real captured photos, not an inferred/discovered-per-photo value.
 
-Submissions are captured as a single plain image (in-app guided camera capture, or a
-gallery-picked file) — `submissions.image_url` (`database-design.md`), one file per
-submission. **v1 is single-page OMR only** — a test needing a multi-page bubble sheet
-isn't supported yet (deliberately deferred, not designed for speculatively). A
-`submission_pages`-style one-to-many relation was considered (and briefly built) for
-multi-page subjective booklets, then reverted — that's out of scope until subjective
-grading is actually being built, not before (`database-design.md` § Design Decisions).
+## In-app guided capture
 
-If/when multi-page support does come back, it should still be **plain per-page images,
-not a bundled PDF**: since capture happens through our own app rather than accepting
-arbitrary externally-assembled documents, there's no benefit to a PDF wrapper — it would
-only add an encode step client-side and a render-back-to-images step server-side before
-AI-vision could touch the content, for no functional gain.
+Submissions are **not** an arbitrary gallery-picked photo. The student captures the
+sheet through the app's own camera screen, which:
+
+- Shows a live on-screen guide (e.g. a rectangle outline) for where the sheet edges
+  should sit in frame, so captures are reasonably consistent in framing and distance
+  before any CV runs.
+- Can optionally attempt live table-border detection in the camera preview and only
+  enable capture once the sheet's outer border is fully visible and reasonably square —
+  catching a bad angle or partial frame *before* the photo is taken, rather than after
+  upload.
+
+This doesn't eliminate real-world capture noise (lighting, shadows, slight blur are
+still possible), but it bounds it a lot more than an unconstrained gallery photo would —
+combined with the fixed template, it's what makes a pure-OpenCV pipeline viable without
+AI as a fallback.
 
 ## How it works
 
 ### 1. Answer key extraction (teacher's test setup)
 
-Two possible inputs, matching `omr-grading.md` §13:
+Same underlying pipeline as a student submission below — the teacher marks the answer
+key directly onto a copy of the same template sheet and captures it the same way.
+A **plain typed/printed answer list** (no photographed sheet) is still supported as a
+separate, simpler path — plain text/PDF extraction gets the `{question: answer}` key
+directly, no CV involved.
 
-- **Teacher uploads a plain typed/printed answer list** (no photographed sheet): plain
-  PDF/text extraction gets the `{question: answer}` key — no AI needed.
-- **Teacher uploads an answer-marked photo/scan of the actual OMR sheet:** one AI-vision
-  call reads the marked answers into the key — same mechanism as a student submission
-  (below), just for the key instead of a graded attempt.
-
-### 2. Student sheet extraction
-
-Every submission's single page image goes to one AI-vision call, which returns:
-
-- `{question_number: selected_option}` for every question it could read, **and**
-- a per-question flag for anything it's not confident about (blank, double-marked,
-  smudged, illegible) — see § Confidence & Teacher Review below.
+### 2. Student sheet extraction — the pipeline
 
 ```
-Teacher's test setup
-        │
-        ├── typed answer list  →  plain text extraction  →  key
-        │
-        └── marked sheet photo →  AI-vision read  →  key
+Captured sheet photo
         │
         ▼
-Every student submission (single page)
+1. Detect the sheet's outer table border (largest quadrilateral contour)
+        │  — not found → extraction fails outright, submission flagged
+        │    for retake, never silently guessed
+        ▼
+2. Compute homography from the detected border's 4 corners → warp/deskew
+   to the canonical (fixed-size, fixed-orientation) image
         │
         ▼
-  AI-vision read  →  {question_number: answer}  +  per-question confidence flags
+3. Sample each bubble's fixed region from the static template config
+   (no discovery — positions are already known)
         │
         ▼
-  flagged questions  →  answers.needs_review = true  →  teacher confirms
+4. Measure fill for each bubble (dark-pixel ratio inside its region)
+        │
+        ▼
+5. Per question: decide the marked option (or flag) from the fill ratios
+        │
+        ▼
+  {question_number: selected_option}  +  per-question needs_review flags
 ```
 
-No caching, no template, no registration step — every sheet is read independently,
-regardless of whether other students in the same test have already submitted.
+No AI call anywhere in this path. No caching/registration step either — every capture
+goes through the same fixed-position sampling, since there's nothing to learn per test.
 
 ## Confidence & Teacher Review
 
-Since there's no separate pixel-level fill-detection step in this design (AI-vision does
-the reading directly, not OpenCV against known bubble positions), confidence has to come
-from the AI's own response, not a fill-percentage measurement. The AI-vision call is
-prompted to flag, per question, exactly the same ambiguous cases the original
-`../omr-grading.md` already names — "any bubble that's ambiguous (smudge, light mark,
-double-mark) is flagged into a quick manual-review screen instead of being silently
-guessed":
+Confidence now comes from a deterministic fill-ratio measurement, not a self-reported
+AI label — the same style of check any classical OMR reader uses:
 
-| Pattern | AI-reported outcome | Result |
+| Pattern | Detected fill ratios | Result |
 |---|---|---|
-| One option clearly marked | `{"answer": "B", "confidence": "high"}` | Auto-accept, no review |
-| Two options both appear marked | `{"answer": null, "flag": "double_mark"}` | `needs_review = true` |
-| Nothing appears marked | `{"answer": null, "flag": "blank_or_unclear"}` | `needs_review = true`, not assumed blank |
-| Mark present but ambiguous/faint | `{"answer": "B", "confidence": "low"}` | `needs_review = true` |
+| Exactly one bubble clearly above the fill threshold, no close runner-up | e.g. B = 95%, others ~30% | Auto-accept, no review |
+| Every option nowhere near the fill threshold | all below ~45% | Auto-accept as unanswered, no review — unambiguously blank |
+| Top option below the fill threshold but not by much | e.g. 55%, threshold 65% | `needs_review = true` — could be a genuine mark the CV under-read, not just blank |
+| Two or more bubbles independently clear the fill threshold | e.g. B = 99%, C = 93% | `needs_review = true` (double-mark — often a crossed-out/corrected answer in practice) |
+| One bubble above threshold but a close runner-up | e.g. B = 70%, C = 62% | `needs_review = true` (low-confidence fill) |
+| Outer table border not detected at all, or the table fills too much of the frame (< 20% or > 80% of the photo's area) | — | Whole submission fails extraction, flagged for retake — never partially guessed |
 
-**What happens on a flag:** `answers.needs_review` is set `true`, the submission surfaces
-in the teacher's review queue, and `PUT /api/submissions/{id}/answers/{q_id}`
-(`backend-architecture.md` § 2.5) lets the teacher confirm or correct the read in seconds.
+Thresholds (`FILL_THRESHOLD = 0.65`, `CONFIDENT_BLANK_THRESHOLD = 0.45`) sit well clear
+of this sheet's actual noise floor: an unmarked printed circle on this sheet carries more
+baseline scan/print ink than the project's own earlier template did (~30-40% fill even
+with nothing drawn in it, not near-zero) — a placeholder threshold of 35% (same order as
+that noise) was tried first and produced false positives on a large fraction of clearly-
+answered questions in testing, both wrongly flagging confident marks as "double-marks"
+(their empty runner-up crossed the low bar) and wrongly flagging genuine blanks as
+"under-read" (blank noise exceeded a too-low blank cutoff). Recalibrated against real
+percentile data (marks read ~85-100%, noise sits ~27-40%) instead of guessing.
 
-**Open item:** unlike the deterministic pixel-threshold approach this replaces, an AI
-model's self-reported confidence is exactly that — self-reported, not a guaranteed
-calibration. Whether "low confidence" as returned by whatever vision provider is chosen
-actually correlates with real ambiguity needs benchmarking against real sample sheets,
-same as everything else flagged as unvalidated in this doc.
+A genuinely blank answer is common (most students skip questions) and isn't itself
+ambiguous — flagging every blank for review would flood the teacher's queue with
+non-issues. Only a *near-miss* blank (low but not negligible fill) stays flagged, since
+that's the pattern that could mean a real mark got under-read, not just skipped.
 
-## Interface shape (`ICvOcrService`)
+**What happens on a flag:** `answers.needs_review` is set `true`, the submission
+surfaces in the teacher's review queue, and `PUT /api/submissions/{id}/answers/{q_id}`
+(`backend-architecture.md` § 2.5) lets the teacher confirm or correct the read in
+seconds — same review mechanism as before, just fed by a deterministic signal instead
+of an AI confidence label.
+
+## Provider abstraction — this can still change without touching any caller
+
+`IBubbleService` (§ Interface shape below) is still the reason this decision isn't a
+one-way door — same pattern as `ILlmService` in `backend-guide.md` § Service Layer &
+Provider Abstraction. Whether extraction is this fixed-template OpenCV pipeline, a
+future multi-template design, or AI-vision again someday, is an implementation detail of
+one class behind that interface. Routers, the submission pipeline, and every other
+caller only ever depend on `IBubbleService`'s method signatures, never on a concrete
+implementation — swapping the underlying approach is a new implementation class plus a
+config value, with zero changes to any code that calls it.
+
+## Interface shape (`IBubbleService`)
+
+Implemented — `app/services/bubble/bubble_service.py`. Named for what it actually reads
+(the bubble grid), not "OCR" — that name is reserved for `IOcrService`
+(`app/services/ocr/ocr_service.py`), the separate handwriting-reading service used for
+the submission header's NAME field (see `accounts-and-roster.md` § Student Identification
+on Upload):
 
 ```python
-class ICvOcrService(Protocol):
+class IBubbleService(Protocol):
     async def detect_bubbles(self, image: bytes, test_id: int) -> Result[AnswerMap, "AppError"]: ...
+    async def extract_name_region(self, image: bytes) -> Result[bytes, "AppError"]: ...
+
+class OpenCvBubbleService:
+    """Pure OpenCV against the one fixed sheet template. No AI, no per-photo bubble
+    discovery — positions come from omr_template.py."""
+    async def detect_bubbles(self, image: bytes, test_id: int) -> Result[AnswerMap, "AppError"]: ...
+    async def extract_name_region(self, image: bytes) -> Result[bytes, "AppError"]: ...
+
+def get_bubble_service() -> IBubbleService:
+    if settings.BUBBLE_DETECTION_PROVIDER == "opencv":
+        return OpenCvBubbleService()
+    raise ValueError(f"Unknown BUBBLE_DETECTION_PROVIDER: {settings.BUBBLE_DETECTION_PROVIDER}")
 ```
 
-MCQ/OMR only — no handwriting/OCR method on this interface at all. Subjective grading is
-its own future PR, not a deferred piece of this one; the method gets added then, alongside
-the schema fields it actually operates on (`database-design.md` § Design Decisions).
+Same shape as originally designed. MCQ/OMR only — no handwriting/OCR method on this
+interface at all; that's added when subjective grading is actually built, as its own PR.
 
-`AnswerMap` includes both the answers and the per-question confidence flags described
-above. `test_id` is accepted but unused for caching in v1 — kept in the signature so the
-future optimization below can be added later without changing the interface or any
-caller. Routers and the submission pipeline never need to know the extraction method
-changed; this matches the "extraction and analytics must be decoupled" principle already
-in `omr-grading.md` §25.
+`AnswerMap` (`app/models/omr.py`) includes both the answers and the per-question
+`needs_review` flags described above. `test_id` is accepted but unused by the current
+single-template implementation — kept in the signature so a future multi-template
+design (§ below) can use it without changing the interface or any caller.
+
+Verified against real scanned sample sheets (`refrence/student-omr.pdf`, 12 filled
+sheets) rendered to photo-like JPEGs — the pipeline correctly detects the table border,
+deskews, and reads all 50 answers on multiple sample sheets, with only genuinely
+faint/ambiguous marks in the source sheets correctly flagged `needs_review`. This
+confirms the pipeline mechanics work against real handwriting and real fill variation;
+it is **not** yet validation against actual phone-camera photos (lighting, perspective,
+motion blur) — see the unresolved items below.
 
 ## What still needs deciding / validating before this is committed
 
-- **AI-vision accuracy for fine-grained bubble reading** — needs benchmarking against a
-  real vision-model provider before assuming it's reliable enough to grade from directly.
-- **Confidence-flag calibration** — does the provider's self-reported confidence actually
-  track real ambiguity, or does it need a stricter rule layered on top (e.g., always
-  flag if the model expresses any uncertainty at all, rather than trusting a "low/high"
-  label at face value)?
-- **Cost at real scale** — needs real per-call pricing from whichever vision-model
-  provider is chosen, multiplied against realistic class sizes, to confirm the "small and
-  bounded" cost claim above actually holds up in practice.
+- **Table-border detection under real photo conditions** — the outer-border contour
+  detection was validated against scanned sheets (clean background, no perspective);
+  it still needs testing against real phone photos, where background clutter, lighting,
+  and non-90-degree viewing angles could make the sheet's border harder to isolate than
+  a page's real markers would have been.
+- **Fill-ratio thresholds are calibrated against 12 real scanned sample sheets**
+  (`refrence/student-omr.pdf`, 600 question-readings), not phone-camera photos — real
+  captures will add lighting/perspective/compression noise this data doesn't have, so
+  these values (`FILL_THRESHOLD = 0.65`, `CONFIDENT_BLANK_THRESHOLD = 0.45`) may still
+  need retuning once real photos are available, just from a validated starting point
+  instead of a guess.
+- **Live in-app border detection** is a client-side capture-quality feature, not a
+  backend concern — this doc only requires that captured images eventually contain the
+  full sheet with its border visible; how strictly the app enforces that before allowing
+  capture is a frontend decision, not specified here.
+- **Sheet printing/distribution** — how the one template actually gets into students'
+  hands (pre-printed by the tuition, generated per-test, etc.) is outside this doc's
+  scope; it only assumes every submission is a photo of that one fixed layout.
 
 ---
 
-## Future Optimization (Not v1): Cached Template, CV-First Detection
+## Future: supporting more than one sheet template
 
-Kept here so the design isn't lost — this is what would replace the AI-vision-per-sheet
-approach above **if** real usage shows AI-vision cost at scale is worth optimizing away.
-
-### The idea
-
-Learn a test's bubble-grid geometry once, from the first sheet, and reuse it cheaply:
-
-1. **First sheet for a test** (key sheet or first student submission): try pure-CV
-   contour detection + geometric row/column clustering first. If it passes structural
-   sanity checks (consistent row spacing, consistent bubble-count per row, plausible
-   reading order), trust it directly — zero AI cost even for the first sheet
-   (`source = 'cv_auto_detected'`). If it fails those checks, one AI-vision call reads
-   the sheet instead and seeds the template from that read (`source = 'ai_vision_seed'`).
-2. **Every submission after that:** align the new photo to the cached template via
-   feature-matching + homography (detect keypoints in both images, match them, compute a
-   perspective transform, warp the new photo into alignment — an established
-   document-scanning technique, not invented for this doc), then read bubbles with cheap
-   OpenCV fill-percentage detection against known positions — no AI involved.
-3. **If a submission doesn't align confidently:** fall back to a one-off AI-vision read
-   for just that sheet.
-
-### Why this needs real validation before ever being built
-
-- **Registration reliability is unproven.** The original standardized sheet had printed
-  fiducial markers specifically so alignment would be reliable regardless of photo angle.
-  An arbitrary tuition's sheet has no such markers — registration has to work off
-  whatever visual structure the sheet naturally has, which is meaningfully less robust
-  against skewed photos, shadows, creases, or a folded sheet.
-- **Structural sanity-check thresholds need tuning** — too strict and everything falls
-  through to AI-vision anyway (defeating the point), too loose and a wrong grouping gets
-  trusted and cached as if correct.
-- **Fill-detection thresholds need tuning** — the same "60% filled, 30-point separation"
-  style deterministic thresholds as any classical OMR reader, illustrative only until
-  validated against real sheets.
-- **The AI-vision fallback wouldn't be a rare edge case** in this design — it's the
-  safety net for exactly the cases registration is least certain about, and should be
-  expected to fire non-trivially often until registration is validated and tuned.
-
-### Schema this would need (not in v1)
-
-A `test_layout_templates` table — one row per test, `source` enum
-(`cv_auto_detected`/`ai_vision_seed`), a `layout_data` JSON blob for the geometry, a
-reference image pointer, and a `passed_sanity_checks` flag. Would also need
-`page_number` scoping if combined with multi-page OMR support, since v1's single-page
-assumption (§ Input format above) would need to be lifted first for that to matter.
-
-### When to revisit
-
-Once v1 (AI-vision-per-sheet) is running with real usage data — if per-submission AI
-cost at actual scale turns out to be a real problem, this is the documented next step,
-not a redesign from scratch.
+Out of scope for now — the whole point of this design is that there's exactly one
+template. If the platform ever needs to support multiple sheet layouts again (e.g.
+different templates per grade, or per tuition), that's a genuinely different problem
+from what this doc solves: it would mean going back to either (a) AI-vision for any
+template not yet known to the system, or (b) a calibration step where a new template's
+geometry is registered once (uploaded + bubble regions marked, or auto-detected and
+confirmed) before it can be read by pure CV — effectively the old deferred cached-template
+idea, but reintroduced deliberately rather than by default. Not something to build
+speculatively now; revisit only if a real second-template requirement shows up.

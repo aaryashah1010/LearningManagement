@@ -63,9 +63,12 @@ app/
 │   ├── submission_router.py
 │   └── report_router.py
 ├── services/
-│   ├── cv_ocr_service.py                   # ICvOcrService — see § Service Layer & Provider Abstraction below
-│   ├── llm_service.py                      # ILlmService
-│   └── storage_service.py                  # IStorageService
+│   ├── bubble/bubble_service.py             # IBubbleService — see § Service Layer & Provider Abstraction below
+│   ├── ocr/ocr_service.py                   # IOcrService — handwriting OCR, separate from bubble reading
+│   ├── llm/llm_service.py                   # ILlmService
+│   ├── pdf/pdf_service.py                   # splits a bulk-uploaded PDF into per-page images
+│   ├── question_paper/question_paper_service.py  # IQuestionPaperService — see question-paper-parsing.md
+│   └── storage/storage_service.py           # IStorageService
 ├── middleware/
 │   ├── auth.py                             # get_current_admin, get_current_teacher, get_current_teacher_or_admin, get_current_student (FastAPI dependencies)
 │   ├── error_handlers.py                   # exception handlers registered on the app
@@ -412,7 +415,9 @@ The router's code never changes if `LLM_PROVIDER` flips from `"anthropic"` to `"
 | Service | Interface | Swappable providers |
 |---|---|---|
 | `llm_service.py` | `ILlmService` | Anthropic (Claude), OpenAI (GPT), etc. |
-| `cv_ocr_service.py` | `ICvOcrService` | AI-vision or a future OpenCV/hosted-vendor swap — `detect_bubbles()` only, no handwriting/OCR method (subjective grading is its own future PR) |
+| `bubble_service.py` | `IBubbleService` | AI-vision or a future OpenCV/hosted-vendor swap — `detect_bubbles()` reads the answer grid, `extract_name_region()` crops the header for `IOcrService` to read |
+| `ocr_service.py` | `IOcrService` | Cloud Vision today; an LLM vision call or another OCR product later — reads the submission header's handwritten NAME field, a separate concern from bubble reading |
+| `question_paper_service.py` | `IQuestionPaperService` | Reads the PDF's own text layer today (`question-paper-parsing.md`); a vision-based provider is a future option, not built — see that doc's § Future |
 | `storage_service.py` | `IStorageService` | S3, GCS, any S3-compatible provider |
 
 No `pdf_toc_service.py`/`IPdfTocService` — curriculum taxonomy is developer-seeded

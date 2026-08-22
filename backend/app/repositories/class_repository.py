@@ -41,6 +41,7 @@ class IClassRepository(Protocol):
     def list_enrollments(
         self, class_id: int, cursor: int | None, limit: int
     ) -> Result[Paginated[StudentView], AppError]: ...
+    def list_all_enrollments(self, class_id: int) -> Result[list[StudentView], AppError]: ...
     def assign_teacher(self, class_id: int, teacher_id: int) -> Result[None, AppError]: ...
     def unassign_teacher(self, class_id: int, teacher_id: int) -> Result[None, AppError]: ...
     def is_teacher_assigned(self, class_id: int, teacher_id: int) -> Result[bool, AppError]: ...
@@ -246,6 +247,19 @@ class ClassRepositoryImpl(IClassRepository):
             )
         except Exception:
             logger.exception("Error listing enrollments")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def list_all_enrollments(self, class_id: int) -> Result[list[StudentView], AppError]:
+        try:
+            rows = fetch_all(
+                "SELECT s.id, s.name, s.email, s.phone FROM students s "
+                "JOIN class_enrollments e ON e.student_id = s.id "
+                "WHERE e.class_id = %s",
+                (class_id,),
+            )
+            return ok([StudentView(**r) for r in rows])
+        except Exception:
+            logger.exception("Error listing all enrollments")
             return err(ERRORS["DATABASE_ERROR"])
 
     def assign_teacher(self, class_id: int, teacher_id: int) -> Result[None, AppError]:

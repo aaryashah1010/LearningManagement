@@ -5,26 +5,14 @@ from app.middleware.auth import get_current_admin, get_current_teacher_or_admin
 from app.models.class_ import AssignTeacherRequest, CreateClassData, TransferEnrollmentRequest
 from app.repositories.class_repository import ClassRepository
 from app.types.token import TokenData
-from app.utils.errors import ERRORS, AppError
 from app.utils.responses import error_response, success_response
-from app.utils.result import Result, err, ok
+from app.utils.scoping import ensure_class_assigned_or_admin
 
 router = APIRouter(prefix="/api/classes", tags=["classes"])
 
 
 def _err(error) -> JSONResponse:
     return JSONResponse(status_code=error.status_code, content=error_response(error.message, error.code))
-
-
-def _ensure_assigned_or_admin(class_id: int, current_user: TokenData) -> Result[None, AppError]:
-    if current_user.role == "admin":
-        return ok(None)
-    assigned = ClassRepository.is_teacher_assigned(class_id, current_user.id)
-    if assigned.is_err():
-        return err(assigned.error)
-    if not assigned.value:
-        return err(ERRORS["CLASS_NOT_FOUND"])  # don't reveal a class exists to an unassigned teacher
-    return ok(None)
 
 
 @router.post("/")
@@ -59,7 +47,7 @@ async def list_classes(
 async def get_class(
     class_id: int, current_user: TokenData = Depends(get_current_teacher_or_admin)
 ) -> JSONResponse:
-    scoped = _ensure_assigned_or_admin(class_id, current_user)
+    scoped = ensure_class_assigned_or_admin(class_id, current_user)
     if scoped.is_err():
         return _err(scoped.error)
     detail_result = ClassRepository.detail(class_id)
@@ -76,7 +64,7 @@ async def list_enrollments(
     limit: int = Query(20, ge=1, le=100),
     current_user: TokenData = Depends(get_current_teacher_or_admin),
 ) -> JSONResponse:
-    scoped = _ensure_assigned_or_admin(class_id, current_user)
+    scoped = ensure_class_assigned_or_admin(class_id, current_user)
     if scoped.is_err():
         return _err(scoped.error)
     result = ClassRepository.list_enrollments(class_id, cursor, limit)
@@ -92,10 +80,10 @@ async def transfer_enrollment(
     body: TransferEnrollmentRequest,
     current_user: TokenData = Depends(get_current_teacher_or_admin),
 ) -> JSONResponse:
-    scoped_source = _ensure_assigned_or_admin(class_id, current_user)
+    scoped_source = ensure_class_assigned_or_admin(class_id, current_user)
     if scoped_source.is_err():
         return _err(scoped_source.error)
-    scoped_dest = _ensure_assigned_or_admin(body.new_class_id, current_user)
+    scoped_dest = ensure_class_assigned_or_admin(body.new_class_id, current_user)
     if scoped_dest.is_err():
         return _err(scoped_dest.error)
     result = ClassRepository.transfer_enrollment(class_id, body.new_class_id, student_id)
@@ -108,7 +96,7 @@ async def transfer_enrollment(
 async def remove_enrollment(
     class_id: int, student_id: int, current_user: TokenData = Depends(get_current_teacher_or_admin)
 ) -> JSONResponse:
-    scoped = _ensure_assigned_or_admin(class_id, current_user)
+    scoped = ensure_class_assigned_or_admin(class_id, current_user)
     if scoped.is_err():
         return _err(scoped.error)
     result = ClassRepository.remove_enrollment(class_id, student_id)

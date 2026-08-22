@@ -129,6 +129,9 @@ CREATE TABLE tests (
 -- MCQ only — no question_type discriminator, no model_answer/keyword_key.
 -- Subjective grading is its own future PR; these come back together then,
 -- not as unused columns kept around now. See § Design Decisions.
+-- option_a-d and image_url are nullable: the manual-entry path (BulkQuestionsRequest)
+-- only ever populated question_text/correct_option; the question-paper PDF upload path
+-- populates all of them, giving a self-contained stored copy of the paper.
 CREATE TABLE questions (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     test_id BIGINT UNSIGNED NOT NULL,
@@ -136,6 +139,11 @@ CREATE TABLE questions (
     question_text TEXT NOT NULL,
     max_marks DECIMAL(6,2) NOT NULL DEFAULT 1.00,
     correct_option VARCHAR(5) NOT NULL COMMENT 'A/B/C/D',
+    option_a TEXT NULL,
+    option_b TEXT NULL,
+    option_c TEXT NULL,
+    option_d TEXT NULL,
+    image_url VARCHAR(500) NULL,
     FOREIGN KEY (test_id) REFERENCES tests(id) ON DELETE CASCADE,
     UNIQUE KEY uq_test_question_number (test_id, question_number),
     INDEX idx_questions_test (test_id)
@@ -153,9 +161,13 @@ CREATE TABLE question_node_map (
     INDEX idx_question_node_map_node (node_id)
 ) ENGINE=InnoDB;
 
--- One row per uploaded sheet per student per test. student_id is always
--- the uploading student's own id (login-only identification, v1) — see
--- § Design Decisions for what comes back once teacher bulk-upload ships.
+-- One row per page of a teacher-uploaded bulk OMR PDF per test. student_id is
+-- nullable — teacher bulk-upload (§ Design Decisions) identifies the student by
+-- OCR-reading the sheet's handwritten NAME field and exact-matching it against
+-- the class roster; when that match fails, the row is still kept (status =
+-- 'needs_review', raw_extracted_name populated) for a teacher to resolve
+-- manually, rather than being dropped. MySQL's unique index treats each NULL
+-- student_id as distinct, so multiple unresolved rows per test are fine.
 -- image_url is a single column, not a one-to-many page relation — v1 is
 -- single-page OMR only. Revisit as a submission_pages table if/when
 -- multi-page subjective booklets are actually being built (still per-page
@@ -163,8 +175,9 @@ CREATE TABLE question_node_map (
 CREATE TABLE submissions (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     test_id BIGINT UNSIGNED NOT NULL,
-    student_id BIGINT UNSIGNED NOT NULL,
+    student_id BIGINT UNSIGNED NULL,
     image_url VARCHAR(500) NOT NULL,
+    raw_extracted_name VARCHAR(255) NULL,
     status ENUM('pending','processed','needs_review') NOT NULL DEFAULT 'pending',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

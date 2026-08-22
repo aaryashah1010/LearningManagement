@@ -17,8 +17,8 @@
 **Python + FastAPI**, single backend, no service split. Resolved this way after weighing
 it directly (see conversation history / team discussion):
 
-- Nearly every core feature here is CV/AI/ML-shaped — OMR answer extraction (OpenCV
-  and/or AI-vision, method left open per `../omr-grading.md`, current version),
+- Nearly every core feature here is CV/AI/ML-shaped — OMR answer extraction (pure
+  OpenCV against a single fixed sheet template, see `omr-extraction-strategy.md`),
   handwriting OCR (deferred), and LLM calls at a couple of pipeline stages. That's the
   majority of the product, not one isolable slice of an
   otherwise generic CRUD app — so keeping it in one language avoids constant
@@ -31,8 +31,8 @@ it directly (see conversation history / team discussion):
   templating/admin/forms.
 - **Every AI/CV/storage provider sits behind an interface** (`backend-guide.md`
   § Service Layer & Provider Abstraction) — swapping Claude for GPT, or the in-house
-  OpenCV/OCR module for a hosted vendor, is a one-file change with zero changes to any
-  router or pipeline code that calls it.
+  OpenCV bubble-reading module for a different extraction method entirely, is a one-file
+  change with zero changes to any router or pipeline code that calls it.
 
 ---
 
@@ -42,8 +42,8 @@ FastAPI (async) · `mysql-connector-python`/`SQLAlchemy Core` · Pydantic v2 ·
 `python-jose` (JWT) · `bcrypt` (password hashing) · stdlib `logging` (rotating file
 handlers, gzip on rotate — see `app/utils/logger.py`) · `slowapi` (rate limiting) ·
 pytest + `pytest-asyncio` + `testcontainers` · Docker Compose (app + MySQL 8) ·
-OpenCV (`opencv-python`) + an OCR library, used directly inside `cv_ocr_service.py` —
-no separate microservice (see § 0 above).
+OpenCV (`opencv-python`), used directly inside `bubble_service.py` — no separate
+microservice (see § 0 above).
 
 ---
 
@@ -250,33 +250,46 @@ questions extracted (Path A: already in question bank; Path B: parsed from uploa
 ### 4c. Submission Processing
 
 ```
-POST /tests/{test_id}/submissions  (student, own login — the only path in v1)
-        │
-        │  student_id = current_student.id — login is the identification,
-        │  no QR/roll-number/matching needed (../accounts-and-roster.md)
-        ▼
-  cv_ocr_service.detect_bubbles()  (§5 — in-process, behind ICvOcrService;
-        │                            v1 = one AI-vision read per sheet, no
-        │                            caching — omr-extraction-strategy.md)
-        ▼
-  compare to questions.correct_option (plain comparison, no AI)
+POST /tests/{test_id}/submissions/bulk  (teacher, one PDF — every student's sheet, one page each)
         │
         ▼
-  low-confidence bubble read?  →  answers.needs_review = true  →  PUT /submissions/{id}/answers/{q_id} (teacher confirms)
+  pdf_service.split_pdf_to_page_images()  (§5 — one PNG per page)
         │
         ▼
-  answers rows written — reference question_id only, never write to curriculum_nodes
+  per page, independently:
+    bubble_service.detect_bubbles()          (IBubbleService — pure OpenCV, no AI)
+    bubble_service.extract_name_region()  →  ocr_service.extract_student_name()
+        │                                     (IOcrService — Cloud Vision reads the
+        │                                      handwritten NAME field)
+        ▼
+  normalize + exact-match name against class roster (../accounts-and-roster.md
+  § Student Identification on Upload)
+        │
+        │  matched → student_id set        no match → student_id = NULL,
+        │                                    raw_extracted_name kept for manual
+        │                                    resolution, status = needs_review
+        ▼
+  compare bubble answers to questions.correct_option (plain comparison, no AI)
+        │
+        ▼
+  ambiguous/failed bubble read, or unmatched name?  →  needs_review = true
+        │                                                (submission and/or per-answer)
+        ▼
+  submissions + answers rows written — answers reference question_id only,
+  never write to curriculum_nodes
   (database-design.md § Design Decisions — "Results never touch the taxonomy")
 ```
 
-**Deferred to Phase 2** (`../accounts-and-roster.md` § Future / Phase 2): teacher bulk-upload,
-QR decode + mismatch rejection, roll-number lookup, manual-match-to-roster. None of this
-is built in v1 — identification is login-only.
+**Deferred** (`../accounts-and-roster.md` § Future — Roll Number / QR as a Stronger
+Identifier): QR decode + mismatch rejection, physical roll-number lookup. Teacher
+bulk-upload itself and NAME-field OCR matching are both built — see above; these two
+remain future strengthenings of match *accuracy*, not the bulk-upload mechanism itself.
 
-**Not part of this system at all — its own future PR:** handwriting OCR, subjective
-partial-credit grading, `model_answer`/`keyword_key` on questions, `marks_awarded`/
-`ai_summary` on answers. Per current review feedback, subjective grading isn't a deferred
-piece of this build, it's a separate PR later — nothing subjective-specific exists in the
+**Not part of this system at all — its own future PR:** handwriting OCR of *answer
+content* (subjective/written answers, as opposed to the NAME field, which is read),
+subjective partial-credit grading, `model_answer`/`keyword_key` on questions,
+`marks_awarded`/`ai_summary` on answers. Per current review feedback, subjective grading
+isn't a deferred piece of this build, it's a separate PR later — nothing subjective-specific exists in the
 schema or the service interfaces right now (`database-design.md` § Design Decisions).
 
 ### 4d. Report Generation
@@ -310,11 +323,12 @@ unnecessary once the taxonomy is small and unsummarized.
 
 | Service | Interface | Swappable providers | Notes |
 |---|---|---|---|
-| `cv_ocr_service.py` | `ICvOcrService` | **v1:** one AI-vision call reads every sheet directly, no caching, no registration — chosen over a cached-template/CV-first design specifically to avoid unvalidated registration risk before real usage justifies the added complexity; see `omr-extraction-strategy.md` for the reasoning and the deferred cached-template design | `detect_bubbles()` only — stateless, image in, structured result (answers + per-question confidence flags) out. No handwriting/OCR method on the interface at all; added when subjective grading is actually built, as its own PR. **Cost note:** a real per-submission AI cost, not free-CV — small and bounded at typical class sizes, but not zero; see `omr-extraction-strategy.md` § What still needs deciding for the open cost-at-scale question |
+| `bubble_service.py` | `IBubbleService` | **v2:** pure OpenCV against one fixed, third-party sheet template (outer table border → deskew → fixed bubble positions → fill-ratio read), no AI, no per-sheet cost — viable specifically because the sheet layout is fixed and known in advance, not arbitrary; see `omr-extraction-strategy.md` for the full reasoning | `detect_bubbles()` — stateless, image in, structured result (answers + per-question `needs_review` flags) out. `extract_name_region()` crops the header for `IOcrService` to read; no OCR/reading logic of its own |
+| `ocr_service.py` | `IOcrService` | Cloud Vision today; another OCR product or an LLM vision call later | Reads the submission header's handwritten NAME field for bulk-upload identification (`accounts-and-roster.md` § Student Identification on Upload) — a separate concern from bubble reading, kept off `IBubbleService` deliberately |
 | `llm_service.py` | `ILlmService` | Anthropic (Claude), OpenAI (GPT), etc. | Three calls across the pipelines (§4b, §4c fallback, §4d) — question-mapping is given one subject's whole taxonomy directly (small enough, no shortlisting needed), never a whole book's raw text. No PDF-parsing service — taxonomy authoring is offline/developer-driven, not an app-level AI call (§4a) |
-| `storage_service.py` | `IStorageService` | S3-compatible object storage | DB stores keys/pointers, never file bytes — `ncert_books.pdf_url`, `submissions.image_url` (`database-design.md` §4) |
+| `storage_service.py` | `IStorageService` | **Implemented:** local disk (`STORAGE_PROVIDER=local`, dev/test default, no cloud credentials needed) — S3 is the documented production target but not implemented yet, so selecting it raises clearly rather than silently doing nothing | DB stores keys/pointers, never file bytes — `ncert_books.pdf_url`, `submissions.image_url` (`database-design.md` §4) |
 
-Config keys: `LLM_PROVIDER`/`LLM_API_KEY`, `S3_*`, `DB_*`, `JWT_*`. Changing a provider
+Config keys: `LLM_PROVIDER`/`LLM_API_KEY`, `STORAGE_PROVIDER`/`LOCAL_STORAGE_PATH`/`S3_*`, `DB_*`, `JWT_*`. Changing a provider
 is a config value + one new implementation class — zero changes to any router,
 repository, or pipeline orchestration code.
 
@@ -333,7 +347,7 @@ repository, or pipeline orchestration code.
 | 6xxxx | Submissions / Grading | `SUBMISSION_NOT_FOUND` 60001·404, `DUPLICATE_SUBMISSION` 60002·409 (`UNIQUE (test_id, student_id)`), `ANSWER_NOT_FOUND` 60003·404 — `QR_STUDENT_MISMATCH`/`ROLL_NUMBER_MISMATCH`/`MATCH_ALREADY_RESOLVED` deferred to Phase 2 with the identification features they belong to |
 | 7xxxx | Reports | `NO_RESULTS_YET` 70001·404 |
 | 8xxxx | Files / Storage | `FILE_TOO_LARGE` 80001·413, `INVALID_FILE_TYPE` 80002·422, `STORAGE_UPLOAD_FAILED` 80003·502 |
-| 9xxxx | External Services (CV/OCR/AI) | `CV_OCR_ERROR` 90001·502, `LLM_SERVICE_ERROR` 90002·502, `LOW_CONFIDENCE_EXTRACTION` 90003·422 (routes to `needs_review` rather than failing) |
+| 9xxxx | External Services (CV/OCR/AI) | `BUBBLE_DETECTION_ERROR` 90001·502, `LLM_SERVICE_ERROR` 90002·502, `LOW_CONFIDENCE_EXTRACTION` 90003·422 (routes to `needs_review` rather than failing), `IMAGE_TOO_BLURRY` 90004·422, `OCR_SERVICE_ERROR` 90005·502 |
 
 ---
 
@@ -354,9 +368,9 @@ See `backend-guide.md` §11 for the mechanics. Priority scenarios per layer:
 1. **Skeleton** — settings, utils (`errors`/`responses`/`logger`/`jwt`/`result`), middleware, DB pool, `main.py`, Docker
 2. **Auth + Classes/Roster** — teacher/student login, class CRUD, enrollments (unlocks everything scoped to a class)
 3. **Subjects + Curriculum Taxonomy** — developer-seeded directly in the DB (read-only via the API); needed before any test can be set up in a subject
-4. **cv_ocr_service** — AI-vision bubble reading (§5, `omr-extraction-strategy.md`); handwriting OCR deferred
+4. **bubble_service** — pure OpenCV bubble reading against the fixed sheet template (§5, `omr-extraction-strategy.md`)
 5. **Tests + Questions** — Path A/B setup, whole-taxonomy question mapping + AI pick, publish lock
-6. **Submissions** — upload (login-only identification, v1), MCQ grading (mechanical), confidence flagging/review. Subjective grading deferred.
+6. **Submissions** — teacher bulk PDF upload, per-page bubble reading + handwriting NAME-field OCR (`ocr_service`) for roster matching (`accounts-and-roster.md` § Student Identification on Upload), MCQ grading (mechanical), confidence flagging/review. Subjective grading deferred.
 7. **Reports** — rollup query, evidence filtering, LLM phrasing — both per-student and class-wide
 
 Each step = model → repository (+ integration tests) → service (if it calls a provider, behind its interface) → router (+ unit tests), per `backend-guide.md` §12's checklist.

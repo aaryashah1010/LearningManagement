@@ -51,10 +51,15 @@ ERRORS: dict[str, AppError] = {
     "QUESTION_PAPER_PARSE_FAILED": AppError("Could not parse the question paper PDF", 50003, 502),
     "NODE_NOT_IN_BOOK_SCOPE": AppError("Curriculum node does not belong to this test's book", 50004, 422),
     "QUESTION_NOT_FOUND": AppError("Question not found", 50005, 404),
+    "TEST_SETUP_PATH_MISMATCH": AppError("This endpoint doesn't match the test's setup path", 50006, 422),
+    "DUPLICATE_QUESTION_NUMBER": AppError(
+        "A question with this number already exists for this test", 50007, 409
+    ),
     # ─── Submissions / Grading (6xxxx) ──────────────────────────────────
     "SUBMISSION_NOT_FOUND": AppError("Submission not found", 60001, 404),
     "DUPLICATE_SUBMISSION": AppError("A submission already exists for this student and test", 60002, 409),
     "ANSWER_NOT_FOUND": AppError("Answer not found", 60003, 404),
+    "SUBMISSION_PDF_INVALID": AppError("Could not read the submitted PDF", 60004, 422),
     # ─── Reports (7xxxx) ─────────────────────────────────────────────────
     "NO_RESULTS_YET": AppError("No graded results yet for this scope", 70001, 404),
     # ─── Files / Storage (8xxxx) ────────────────────────────────────────
@@ -62,9 +67,11 @@ ERRORS: dict[str, AppError] = {
     "INVALID_FILE_TYPE": AppError("Unsupported file type", 80002, 422),
     "STORAGE_UPLOAD_FAILED": AppError("Failed to upload file to storage", 80003, 502),
     # ─── External Services — CV / OCR / AI (9xxxx) ──────────────────────
-    "CV_OCR_ERROR": AppError("Bubble detection failed", 90001, 502),
+    "BUBBLE_DETECTION_ERROR": AppError("Bubble detection failed", 90001, 502),
     "LLM_SERVICE_ERROR": AppError("AI service call failed", 90002, 502),
     "LOW_CONFIDENCE_EXTRACTION": AppError("Extraction confidence too low", 90003, 422),
+    "IMAGE_TOO_BLURRY": AppError("Image is too blurry to read, please retake the photo", 90004, 422),
+    "OCR_SERVICE_ERROR": AppError("Handwriting OCR call failed", 90005, 502),
 }
 
 

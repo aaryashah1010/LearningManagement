@@ -235,3 +235,378 @@ INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_
     (@book_id, @ch14_t1, 'subtopic', 'Theoretical Probability - Definition, Elementary Events, and Complementary Events', 202, 207),
     (@book_id, @ch14_t1, 'subtopic', 'Applications - Single-Stage Random Selection from Cards, Balls, and Coins', 207, 210),
     (@book_id, @ch14_t1, 'subtopic', 'Continuous Outcomes and Compound Experiments - Number Line, Area, and Two Dice', 210, 214);
+
+-- Science curriculum: all 13 chapters from book/Science-10/ (jesc101-113).
+INSERT INTO subjects (name) VALUES ('Science');
+SET @subject_id = LAST_INSERT_ID();
+
+INSERT INTO ncert_books (subject_id, title, grade, edition_year, pdf_url) VALUES
+    (@subject_id, 'Science', 'Class 10', 2022, 'https://ncert.nic.in/textbook.php?jesc1=1-14');
+SET @book_id = LAST_INSERT_ID();
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, NULL, 'chapter', 'Chemical Reactions and Equations', 1, 14);
+SET @sch1 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch1, 'topic', 'Chemical Equations', 2, 5);
+SET @sch1_t1 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch1_t1, 'subtopic', 'Writing a Chemical Equation', 2, 3),
+    (@book_id, @sch1_t1, 'subtopic', 'Balanced Chemical Equations', 3, 5);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch1, 'topic', 'Types of Chemical Reactions', 6, 13);
+SET @sch1_t2 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch1_t2, 'subtopic', 'Combination Reaction', 6, 7),
+    (@book_id, @sch1_t2, 'subtopic', 'Decomposition Reaction', 8, 10),
+    (@book_id, @sch1_t2, 'subtopic', 'Displacement Reaction', 10, 11),
+    (@book_id, @sch1_t2, 'subtopic', 'Double Displacement Reaction', 11, 12),
+    (@book_id, @sch1_t2, 'subtopic', 'Oxidation and Reduction', 12, 13);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch1, 'topic', 'Have you Observed the Effects of Oxidation Reactions in Everyday Life?', 13, 14);
+SET @sch1_t3 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch1_t3, 'subtopic', 'Corrosion', 13, 13),
+    (@book_id, @sch1_t3, 'subtopic', 'Rancidity', 13, 14);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, NULL, 'chapter', 'Acids, Bases and Salts', 17, 36);
+SET @sch2 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch2, 'topic', 'Understanding the Chemical Properties of Acids and Bases', 18, 22);
+SET @sch2_t1 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch2_t1, 'subtopic', 'Acids and Bases in the Laboratory', 18, 19),
+    (@book_id, @sch2_t1, 'subtopic', 'How do Acids and Bases React with Metals?', 19, 20),
+    (@book_id, @sch2_t1, 'subtopic', 'How do Metal Carbonates and Metal Hydrogencarbonates React with Acids?', 20, 21),
+    (@book_id, @sch2_t1, 'subtopic', 'How do Acids and Bases React with each other?', 21, 21),
+    (@book_id, @sch2_t1, 'subtopic', 'Reaction of Metallic Oxides with Acids', 21, 22),
+    (@book_id, @sch2_t1, 'subtopic', 'Reaction of a Non-metallic Oxide with Base', 22, 22);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch2, 'topic', 'What do all Acids and all Bases have in Common?', 22, 24);
+SET @sch2_t2 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch2_t2, 'subtopic', 'What Happens to an Acid or a Base in a Water Solution?', 23, 24);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch2, 'topic', 'How Strong are Acid or Base Solutions?', 25, 28);
+SET @sch2_t3 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch2_t3, 'subtopic', 'Importance of pH in Everyday Life', 26, 28);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch2, 'topic', 'More about Salts', 28, 36);
+SET @sch2_t4 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch2_t4, 'subtopic', 'Family of Salts', 28, 29),
+    (@book_id, @sch2_t4, 'subtopic', 'pH of Salts', 29, 29),
+    (@book_id, @sch2_t4, 'subtopic', 'Chemicals from Common Salt', 29, 31),
+    (@book_id, @sch2_t4, 'subtopic', 'Are the Crystals of Salts really Dry?', 32, 33);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, NULL, 'chapter', 'Metals and Non-metals', 37, 57);
+SET @sch3 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch3, 'topic', 'Physical Properties', 38, 40);
+SET @sch3_t1 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch3_t1, 'subtopic', 'Metals', 38, 39),
+    (@book_id, @sch3_t1, 'subtopic', 'Non-metals', 39, 40);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch3, 'topic', 'Chemical Properties of Metals', 40, 46);
+SET @sch3_t2 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch3_t2, 'subtopic', 'What Happens when Metals are Burnt in Air?', 41, 42),
+    (@book_id, @sch3_t2, 'subtopic', 'What Happens when Metals React with Water?', 42, 43),
+    (@book_id, @sch3_t2, 'subtopic', 'What Happens when Metals React with Acids?', 43, 44),
+    (@book_id, @sch3_t2, 'subtopic', 'How do Metals React with Solutions of other Metal Salts?', 44, 45),
+    (@book_id, @sch3_t2, 'subtopic', 'The Reactivity Series', 45, 46);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch3, 'topic', 'How do Metals and Non-metals React?', 46, 49);
+SET @sch3_t3 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch3_t3, 'subtopic', 'Properties of Ionic Compounds', 47, 49);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch3, 'topic', 'Occurrence of Metals', 49, 52);
+SET @sch3_t4 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch3_t4, 'subtopic', 'Extraction of Metals', 49, 50),
+    (@book_id, @sch3_t4, 'subtopic', 'Enrichment of Ores', 50, 51),
+    (@book_id, @sch3_t4, 'subtopic', 'Extracting Metals Low in the Activity Series', 51, 51),
+    (@book_id, @sch3_t4, 'subtopic', 'Extracting Metals in the Middle of the Activity Series', 51, 52),
+    (@book_id, @sch3_t4, 'subtopic', 'Extracting Metals towards the Top of the Activity Series', 52, 52),
+    (@book_id, @sch3_t4, 'subtopic', 'Refining of Metals', 52, 53);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch3, 'topic', 'Corrosion', 53, 57);
+SET @sch3_t5 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch3_t5, 'subtopic', 'Prevention of Corrosion', 54, 57);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, NULL, 'chapter', 'Carbon and its Compounds', 58, 78);
+SET @sch4 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch4, 'topic', 'Bonding in Carbon - The Covalent Bond', 59, 61);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch4, 'topic', 'Versatile Nature of Carbon', 62, 68);
+SET @sch4_t2 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch4_t2, 'subtopic', 'Saturated and Unsaturated Carbon Compounds', 63, 64),
+    (@book_id, @sch4_t2, 'subtopic', 'Chains, Branches and Rings', 64, 65),
+    (@book_id, @sch4_t2, 'subtopic', 'Will you be my Friend?', 65, 66),
+    (@book_id, @sch4_t2, 'subtopic', 'Homologous Series', 66, 67),
+    (@book_id, @sch4_t2, 'subtopic', 'Nomenclature of Carbon Compounds', 67, 68);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch4, 'topic', 'Chemical Properties of Carbon Compounds', 69, 71);
+SET @sch4_t3 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch4_t3, 'subtopic', 'Combustion', 69, 70),
+    (@book_id, @sch4_t3, 'subtopic', 'Oxidation', 70, 71),
+    (@book_id, @sch4_t3, 'subtopic', 'Addition Reaction', 71, 71),
+    (@book_id, @sch4_t3, 'subtopic', 'Substitution Reaction', 71, 71);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch4, 'topic', 'Some Important Carbon Compounds - Ethanol and Ethanoic Acid', 71, 74);
+SET @sch4_t4 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch4_t4, 'subtopic', 'Properties of Ethanol', 72, 72),
+    (@book_id, @sch4_t4, 'subtopic', 'Properties of Ethanoic Acid', 73, 74);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch4, 'topic', 'Soaps and Detergents', 74, 76);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, NULL, 'chapter', 'Life Processes', 79, 99);
+SET @sch5 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch5, 'topic', 'What are Life Processes?', 79, 81);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch5, 'topic', 'Nutrition', 81, 86);
+SET @sch5_t2 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch5_t2, 'subtopic', 'Autotrophic Nutrition', 81, 83),
+    (@book_id, @sch5_t2, 'subtopic', 'Heterotrophic Nutrition', 84, 84),
+    (@book_id, @sch5_t2, 'subtopic', 'How do Organisms obtain their Nutrition?', 84, 84),
+    (@book_id, @sch5_t2, 'subtopic', 'Nutrition in Human Beings', 84, 86);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch5, 'topic', 'Respiration', 87, 90);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch5, 'topic', 'Transportation', 91, 95);
+SET @sch5_t4 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch5_t4, 'subtopic', 'Transportation in Human Beings', 91, 94),
+    (@book_id, @sch5_t4, 'subtopic', 'Transportation in Plants', 94, 95);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch5, 'topic', 'Excretion', 96, 98);
+SET @sch5_t5 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch5_t5, 'subtopic', 'Excretion in Human Beings', 96, 97),
+    (@book_id, @sch5_t5, 'subtopic', 'Excretion in Plants', 98, 98);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, NULL, 'chapter', 'Control and Coordination', 100, 112);
+SET @sch6 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch6, 'topic', 'Animals - Nervous System', 100, 104);
+SET @sch6_t1 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch6_t1, 'subtopic', 'What happens in Reflex Actions?', 102, 103),
+    (@book_id, @sch6_t1, 'subtopic', 'Human Brain', 103, 104),
+    (@book_id, @sch6_t1, 'subtopic', 'How are these Tissues protected?', 105, 105),
+    (@book_id, @sch6_t1, 'subtopic', 'How does the Nervous Tissue cause Action?', 105, 105);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch6, 'topic', 'Coordination in Plants', 105, 108);
+SET @sch6_t2 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch6_t2, 'subtopic', 'Immediate Response to Stimulus', 106, 106),
+    (@book_id, @sch6_t2, 'subtopic', 'Movement Due to Growth', 106, 108);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch6, 'topic', 'Hormones in Animals', 109, 111);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, NULL, 'chapter', 'How do Organisms Reproduce?', 113, 127);
+SET @sch7 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch7, 'topic', 'Do Organisms Create Exact Copies of Themselves?', 113, 114);
+SET @sch7_t1 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch7_t1, 'subtopic', 'The Importance of Variation', 114, 114);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch7, 'topic', 'Modes of Reproduction Used by Single Organisms', 115, 119);
+SET @sch7_t2 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch7_t2, 'subtopic', 'Fission', 115, 116),
+    (@book_id, @sch7_t2, 'subtopic', 'Fragmentation', 116, 116),
+    (@book_id, @sch7_t2, 'subtopic', 'Regeneration', 116, 117),
+    (@book_id, @sch7_t2, 'subtopic', 'Budding', 117, 117),
+    (@book_id, @sch7_t2, 'subtopic', 'Vegetative Propagation', 117, 118),
+    (@book_id, @sch7_t2, 'subtopic', 'Spore Formation', 118, 119);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch7, 'topic', 'Sexual Reproduction', 119, 126);
+SET @sch7_t3 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch7_t3, 'subtopic', 'Why the Sexual Mode of Reproduction?', 119, 120),
+    (@book_id, @sch7_t3, 'subtopic', 'Sexual Reproduction in Flowering Plants', 120, 121),
+    (@book_id, @sch7_t3, 'subtopic', 'Male Reproductive System', 121, 123),
+    (@book_id, @sch7_t3, 'subtopic', 'Female Reproductive System', 123, 124),
+    (@book_id, @sch7_t3, 'subtopic', 'What Happens when the Egg is not Fertilised', 124, 124),
+    (@book_id, @sch7_t3, 'subtopic', 'Reproductive Health', 124, 125);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, NULL, 'chapter', 'Heredity', 128, 133);
+SET @sch8 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch8, 'topic', 'Accumulation of Variation during Reproduction', 128, 129);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch8, 'topic', 'Heredity', 129, 133);
+SET @sch8_t2 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch8_t2, 'subtopic', 'Inherited Traits', 129, 129),
+    (@book_id, @sch8_t2, 'subtopic', 'Rules for the Inheritance of Traits - Mendel''s Contributions', 129, 131),
+    (@book_id, @sch8_t2, 'subtopic', 'How do these Traits get Expressed?', 131, 132),
+    (@book_id, @sch8_t2, 'subtopic', 'Sex Determination', 132, 133);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, NULL, 'chapter', 'Light - Reflection and Refraction', 134, 160);
+SET @sch9 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch9, 'topic', 'Reflection of Light', 134, 135);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch9, 'topic', 'Spherical Mirrors', 135, 145);
+SET @sch9_t2 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch9_t2, 'subtopic', 'Image Formation by Spherical Mirrors', 137, 138),
+    (@book_id, @sch9_t2, 'subtopic', 'Representation of Images Formed by Spherical Mirrors Using Ray Diagrams', 138, 142),
+    (@book_id, @sch9_t2, 'subtopic', 'Sign Convention for Reflection by Spherical Mirrors', 142, 143),
+    (@book_id, @sch9_t2, 'subtopic', 'Mirror Formula and Magnification', 143, 145);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch9, 'topic', 'Refraction of Light', 145, 158);
+SET @sch9_t3 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch9_t3, 'subtopic', 'Refraction through a Rectangular Glass Slab', 146, 148),
+    (@book_id, @sch9_t3, 'subtopic', 'The Refractive Index', 148, 149),
+    (@book_id, @sch9_t3, 'subtopic', 'Refraction by Spherical Lenses', 150, 152),
+    (@book_id, @sch9_t3, 'subtopic', 'Image Formation by Lenses', 152, 153),
+    (@book_id, @sch9_t3, 'subtopic', 'Image Formation in Lenses Using Ray Diagrams', 153, 155),
+    (@book_id, @sch9_t3, 'subtopic', 'Sign Convention for Spherical Lenses', 155, 155),
+    (@book_id, @sch9_t3, 'subtopic', 'Lens Formula and Magnification', 155, 157),
+    (@book_id, @sch9_t3, 'subtopic', 'Power of a Lens', 157, 158);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, NULL, 'chapter', 'The Human Eye and the Colourful World', 161, 170);
+SET @sch10 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch10, 'topic', 'The Human Eye', 161, 162);
+SET @sch10_t1 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch10_t1, 'subtopic', 'Power of Accommodation', 162, 162);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch10, 'topic', 'Defects of Vision and their Correction', 162, 165);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch10, 'topic', 'Refraction of Light through a Prism', 165, 166);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch10, 'topic', 'Dispersion of White Light by a Glass Prism', 166, 167);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch10, 'topic', 'Atmospheric Refraction', 168, 168);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch10, 'topic', 'Scattering of Light', 169, 170);
+SET @sch10_t6 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch10_t6, 'subtopic', 'Tyndall Effect', 169, 169),
+    (@book_id, @sch10_t6, 'subtopic', 'Why is the colour of the clear Sky Blue?', 169, 169);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, NULL, 'chapter', 'Electricity', 171, 194);
+SET @sch11 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch11, 'topic', 'Electric Current and Circuit', 171, 172);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch11, 'topic', 'Electric Potential and Potential Difference', 173, 174);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch11, 'topic', 'Circuit Diagram', 174, 176);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch11, 'topic', 'Ohm''s Law', 176, 177);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch11, 'topic', 'Factors on which the Resistance of a Conductor Depends', 177, 181);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch11, 'topic', 'Resistance of a System of Resistors', 181, 188);
+SET @sch11_t6 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch11_t6, 'subtopic', 'Resistors in Series', 182, 185),
+    (@book_id, @sch11_t6, 'subtopic', 'Resistors in Parallel', 185, 188);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch11, 'topic', 'Heating Effect of Electric Current', 188, 191);
+SET @sch11_t7 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch11_t7, 'subtopic', 'Practical Applications of Heating Effect of Electric Current', 190, 191);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch11, 'topic', 'Electric Power', 191, 192);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, NULL, 'chapter', 'Magnetic Effects of Electric Current', 195, 207);
+SET @sch12 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch12, 'topic', 'Magnetic Field and Field Lines', 196, 197);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch12, 'topic', 'Magnetic Field due to a Current-carrying Conductor', 197, 202);
+SET @sch12_t2 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch12_t2, 'subtopic', 'Magnetic Field due to a Current through a Straight Conductor', 198, 199),
+    (@book_id, @sch12_t2, 'subtopic', 'Right-Hand Thumb Rule', 199, 200),
+    (@book_id, @sch12_t2, 'subtopic', 'Magnetic Field due to a Current through a Circular Loop', 200, 201),
+    (@book_id, @sch12_t2, 'subtopic', 'Magnetic Field due to a Current in a Solenoid', 201, 202);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch12, 'topic', 'Force on a Current-carrying Conductor in a Magnetic Field', 202, 204);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch12, 'topic', 'Domestic Electric Circuits', 204, 205);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, NULL, 'chapter', 'Our Environment', 208, 217);
+SET @sch13 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch13, 'topic', 'Eco-system - What are its Components?', 208, 210);
+SET @sch13_t1 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch13_t1, 'subtopic', 'Food Chains and Webs', 210, 212);
+
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch13, 'topic', 'How do our Activities Affect the Environment?', 212, 216);
+SET @sch13_t2 = LAST_INSERT_ID();
+INSERT INTO curriculum_nodes (book_id, parent_id, level, name, page_start, page_end) VALUES
+    (@book_id, @sch13_t2, 'subtopic', 'Ozone Layer and How it is Getting Depleted', 212, 213),
+    (@book_id, @sch13_t2, 'subtopic', 'Managing the Garbage we Produce', 213, 216);
