@@ -4,7 +4,7 @@ from mysql.connector.errors import IntegrityError
 
 from app.database.pool import execute, fetch_all, fetch_one, transaction
 from app.models.question import CreateQuestionData, Question
-from app.models.test import Test, TestSetupPath
+from app.models.test import StudentTestSummary, Test, TestSetupPath
 from app.utils.errors import ERRORS, AppError
 from app.utils.logger import get_logger
 from app.utils.result import Result, err, ok
@@ -22,6 +22,7 @@ class ITestRepository(Protocol):
     ) -> Result[Test, AppError]: ...
     def find_by_id(self, test_id: int) -> Result[Test, AppError]: ...
     def list_for_class(self, class_id: int) -> Result[list[Test], AppError]: ...
+    def list_published_for_student(self, student_id: int) -> Result[list[StudentTestSummary], AppError]: ...
     def create_questions_bulk(
         self, test_id: int, questions: list[CreateQuestionData]
     ) -> Result[list[Question], AppError]: ...
@@ -71,6 +72,41 @@ class TestRepositoryImpl(ITestRepository):
             return ok([Test(**r) for r in rows])
         except Exception:
             logger.exception("Error listing tests for class")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def list_published_for_student(self, student_id: int) -> Result[list[StudentTestSummary], AppError]:
+        try:
+            # A student can be enrolled in more than one class (class_enrollments is
+            # many-to-many) — join through it rather than assuming a single class_id.
+            # Draft tests never appear here (published_at IS NOT NULL). The submission
+            # join is scoped to this student specifically, so a test nobody has
+            # submitted for yet still lists with submission_id = NULL rather than
+            # being skipped outright — same "always show the row" approach as
+            # save_pending_for_test's needs_review fallback.
+            rows = fetch_all(
+                "SELECT t.id AS id, t.class_id AS class_id, t.title AS title, "
+                "t.published_at AS published_at, "
+                "s.id AS submission_id, s.status AS submission_status, "
+                "SUM(a.is_correct) AS correct_count, COUNT(a.id) AS total_count "
+                "FROM class_enrollments ce "
+                "JOIN tests t ON t.class_id = ce.class_id AND t.published_at IS NOT NULL "
+                "LEFT JOIN submissions s ON s.test_id = t.id AND s.student_id = ce.student_id "
+                "LEFT JOIN answers a ON a.submission_id = s.id "
+                "WHERE ce.student_id = %s "
+                "GROUP BY t.id, t.class_id, t.title, t.published_at, s.id, s.status "
+                "ORDER BY t.published_at DESC",
+                (student_id,),
+            )
+            return ok(
+                [
+                    StudentTestSummary(
+                        **{**row, "total_count": row["total_count"] or None}
+                    )
+                    for row in rows
+                ]
+            )
+        except Exception:
+            logger.exception("Error listing published tests for student")
             return err(ERRORS["DATABASE_ERROR"])
 
     def create_questions_bulk(
