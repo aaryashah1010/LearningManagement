@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-ink: #1e2a2f;
+  --color-paper: #faf6ec;
+  --color-correct: #34a76f;
+  --color-correct-dark: #278257;
+  --color-mark: #e4572e;
+  --color-chalk: #f0b429;
+  --color-slate: #232f35;
+
+  /* Chart data-ink — validated with the dataviz skill's palette checker
+     against both surfaces (paper + slate); `correct`/`chalk` are UI accents
+     tuned for buttons and dark-panel dots, not for marks on a chart surface. */
+  --color-chart-green: #31a06c;
+  --color-chart-amber: #b8860b;
+
+  --font-display: var(--font-fraunces);
+  --font-body: var(--font-manrope);
+  --font-utility: var(--font-plex-mono);
+}
+
+body {
+  font-feature-settings: "ss01" 1;
+}
+
+::selection {
+  background-color: var(--color-correct);
+  color: var(--color-ink);
+}
+
+/* Edge/IE ship their own built-in password reveal + clear icons — hide them
+   so our own eye toggle is the only one, instead of showing two. */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+
+.bg-paper-rule {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 35px,
+    color-mix(in srgb, var(--color-ink) 6%, transparent) 35px,
+    color-mix(in srgb, var(--color-ink) 6%, transparent) 36px
+  );
+}
+
+.bg-chalk-dust {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--color-paper) 14%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 18px 18px;
+}
