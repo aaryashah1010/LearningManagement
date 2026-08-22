@@ -1,9 +1,14 @@
-from fastapi import APIRouter, Depends, UploadFile
+from fastapi import APIRouter, Depends, Query, UploadFile
 from fastapi.responses import JSONResponse
 
-from app.middleware.auth import get_current_teacher_or_admin
+from app.middleware.auth import get_current_teacher_or_admin, get_current_user
 from app.models.question import Question
-from app.models.submission import AssignStudentRequest, CreateAnswerData, SubmissionStatus
+from app.models.submission import (
+    AssignStudentRequest,
+    CreateAnswerData,
+    SubmissionStatus,
+    UpdateAnswerRequest,
+)
 from app.repositories.class_repository import ClassRepository
 from app.repositories.submission_repository import SubmissionRepository
 from app.repositories.test_repository import TestRepository
@@ -41,8 +46,8 @@ async def _process_page(
     storage: IStorageService,
 ) -> None:
     """Best-effort per page — one bad sheet in the batch shouldn't fail the rest.
-    Any extraction failure still yields a needs_review submission so the teacher sees
-    it, rather than silently dropping that student's sheet from the batch."""
+    Always lands as a 'pending' draft (regardless of match/confidence outcome) for the
+    teacher to review — nothing is final until POST .../submissions/save."""
     bubble_result = await bubble.detect_bubbles(page_image, test_id)
     name_crop_result = await bubble.extract_name_region(page_image)
 
@@ -63,7 +68,6 @@ async def _process_page(
     image_url = upload_result.value
 
     answers: list[CreateAnswerData] = []
-    any_needs_review = student_id is None
     if bubble_result.is_ok():
         for answer in bubble_result.value.answers:
             question = question_by_number.get(answer.question_number)
@@ -80,13 +84,9 @@ async def _process_page(
                     needs_review=answer.needs_review,
                 )
             )
-            any_needs_review = any_needs_review or answer.needs_review
-    else:
-        any_needs_review = True
 
-    status: SubmissionStatus = "needs_review" if any_needs_review else "processed"
     create_result = SubmissionRepository.create_with_answers(
-        test_id, student_id, image_url, raw_name, status, answers
+        test_id, student_id, image_url, raw_name, answers
     )
     if create_result.is_err():
         logger.warning(
@@ -147,14 +147,16 @@ async def upload_bulk_submissions(
     return JSONResponse(
         status_code=201,
         content=success_response(
-            {"pages_processed": len(pages_result.value)}, "Bulk submission processed"
+            {"pages_processed": len(pages_result.value)}, "Bulk submission uploaded — pending review"
         ),
     )
 
 
 @router.get("/api/tests/{test_id}/submissions")
 async def list_submissions(
-    test_id: int, current_user: TokenData = Depends(get_current_teacher_or_admin)
+    test_id: int,
+    status: SubmissionStatus | None = Query(default=None),
+    current_user: TokenData = Depends(get_current_teacher_or_admin),
 ) -> JSONResponse:
     test_result = TestRepository.find_by_id(test_id)
     if test_result.is_err():
@@ -163,11 +165,98 @@ async def list_submissions(
     if scoped.is_err():
         return _err(scoped.error)
 
-    result = SubmissionRepository.list_for_test(test_id)
+    result = SubmissionRepository.list_for_test(test_id, status)
     if result.is_err():
         return _err(result.error)
     return JSONResponse(
         status_code=200, content=success_response([s.model_dump(mode="json") for s in result.value])
+    )
+
+
+def _ensure_submission_test(submission_id: int):
+    """Fetches the submission and its parent test together — most submission routes
+    need both (the submission itself, and the test's class_id for scoping)."""
+    submission_result = SubmissionRepository.find_by_id(submission_id)
+    if submission_result.is_err():
+        return submission_result, None
+    test_result = TestRepository.find_by_id(submission_result.value.test_id)
+    if test_result.is_err():
+        return test_result, None
+    return submission_result, test_result.value
+
+
+@router.get("/api/submissions/{submission_id}")
+async def get_submission(
+    submission_id: int, current_user: TokenData = Depends(get_current_user)
+) -> JSONResponse:
+    submission_result, test = _ensure_submission_test(submission_id)
+    if submission_result.is_err():
+        return _err(submission_result.error)
+    submission = submission_result.value
+
+    if current_user.role == "student":
+        if submission.student_id != current_user.id:
+            return _err(ERRORS["FORBIDDEN"])
+    else:
+        scoped = ensure_class_assigned_or_admin(test.class_id, current_user)
+        if scoped.is_err():
+            return _err(scoped.error)
+
+    answers_result = SubmissionRepository.list_answers(submission_id)
+    if answers_result.is_err():
+        return _err(answers_result.error)
+    questions_result = TestRepository.list_questions(test.id)
+    if questions_result.is_err():
+        return _err(questions_result.error)
+    question_by_id = {q.id: q for q in questions_result.value}
+
+    answers = []
+    for answer in answers_result.value:
+        question = question_by_id.get(answer.question_id)
+        answers.append(
+            {
+                **answer.model_dump(mode="json"),
+                "question_number": question.question_number if question else None,
+                "correct_option": question.correct_option if question else None,
+            }
+        )
+
+    body = submission.model_dump(mode="json")
+    body["answers"] = answers
+    return JSONResponse(status_code=200, content=success_response(body))
+
+
+@router.put("/api/submissions/{submission_id}/answers/{question_id}")
+async def update_submission_answer(
+    submission_id: int,
+    question_id: int,
+    body: UpdateAnswerRequest,
+    current_user: TokenData = Depends(get_current_teacher_or_admin),
+) -> JSONResponse:
+    submission_result, test = _ensure_submission_test(submission_id)
+    if submission_result.is_err():
+        return _err(submission_result.error)
+    scoped = ensure_class_assigned_or_admin(test.class_id, current_user)
+    if scoped.is_err():
+        return _err(scoped.error)
+
+    question_result = TestRepository.find_question(question_id)
+    if question_result.is_err():
+        return _err(question_result.error)
+    if question_result.value.test_id != test.id:
+        return _err(ERRORS["ANSWER_NOT_FOUND"])
+
+    is_correct = (
+        body.selected_option == question_result.value.correct_option
+        if body.selected_option is not None
+        else False
+    )
+    result = SubmissionRepository.update_answer(submission_id, question_id, body.selected_option, is_correct)
+    if result.is_err():
+        return _err(result.error)
+    return JSONResponse(
+        status_code=200,
+        content=success_response(result.value.model_dump(mode="json"), "Answer updated"),
     )
 
 
@@ -177,15 +266,9 @@ async def assign_submission_student(
     body: AssignStudentRequest,
     current_user: TokenData = Depends(get_current_teacher_or_admin),
 ) -> JSONResponse:
-    submission_result = SubmissionRepository.find_by_id(submission_id)
+    submission_result, test = _ensure_submission_test(submission_id)
     if submission_result.is_err():
         return _err(submission_result.error)
-    submission = submission_result.value
-
-    test_result = TestRepository.find_by_id(submission.test_id)
-    if test_result.is_err():
-        return _err(test_result.error)
-    test = test_result.value
     scoped = ensure_class_assigned_or_admin(test.class_id, current_user)
     if scoped.is_err():
         return _err(scoped.error)
@@ -196,10 +279,27 @@ async def assign_submission_student(
     if not enrolled_result.value:
         return _err(ERRORS["STUDENT_NOT_IN_CLASS"])
 
-    result = SubmissionRepository.assign_student(submission_id, body.student_id)
+    result = SubmissionRepository.assign_student(submission_id, body.student_id, body.raw_extracted_name)
     if result.is_err():
         return _err(result.error)
     return JSONResponse(
         status_code=200,
         content=success_response(result.value.model_dump(mode="json"), "Student assigned"),
     )
+
+
+@router.post("/api/tests/{test_id}/submissions/save")
+async def save_submissions(
+    test_id: int, current_user: TokenData = Depends(get_current_teacher_or_admin)
+) -> JSONResponse:
+    test_result = TestRepository.find_by_id(test_id)
+    if test_result.is_err():
+        return _err(test_result.error)
+    scoped = ensure_class_assigned_or_admin(test_result.value.class_id, current_user)
+    if scoped.is_err():
+        return _err(scoped.error)
+
+    result = SubmissionRepository.save_pending_for_test(test_id)
+    if result.is_err():
+        return _err(result.error)
+    return JSONResponse(status_code=200, content=success_response(result.value, "Submissions saved"))
