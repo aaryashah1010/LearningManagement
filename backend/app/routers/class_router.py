@@ -109,7 +109,7 @@ async def remove_enrollment(
 async def list_class_teachers(
     class_id: int, current_user: TokenData = Depends(get_current_teacher_or_admin)
 ) -> JSONResponse:
-    scoped = _ensure_assigned_or_admin(class_id, current_user)
+    scoped = ensure_class_assigned_or_admin(class_id, current_user)
     if scoped.is_err():
         return _err(scoped.error)
     result = ClassRepository.list_assigned_teachers(class_id)
