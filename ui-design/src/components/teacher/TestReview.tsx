@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { CheckIcon, SubmissionsIcon } from "@/components/icons";
+import { SubmissionsIcon } from "@/components/icons";
 import { Button } from "@/components/ui/Button";
-import { submissionsForTest, type MockClass, type MockQuestion, type MockTest, type TestStatus } from "@/lib/mock-data";
-
-type SheetsStatus = "idle" | "uploading" | "done";
+import { MarksheetFlow } from "@/components/teacher/MarksheetFlow";
+import type { MockClass, MockQuestion, MockTest, TestStatus } from "@/lib/mock-data";
 
 // Illustrates what "AI extraction" would hand back for a fresh draft test —
 // same worked example as docs/omr-grading.md § 12.
@@ -22,8 +21,6 @@ export function TestReview({ test, cls }: { test: MockTest; cls: MockClass }) {
   const [extracting, setExtracting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftPath, setDraftPath] = useState("");
-  const [sheetsStatus, setSheetsStatus] = useState<SheetsStatus>("idle");
-  const gradedCount = submissionsForTest(test.id).length;
 
   function handleUpload() {
     setExtracting(true);
@@ -31,11 +28,6 @@ export function TestReview({ test, cls }: { test: MockTest; cls: MockClass }) {
       setQuestions(DEMO_QUESTIONS);
       setExtracting(false);
     }, 900);
-  }
-
-  function handleUploadSheets() {
-    setSheetsStatus("uploading");
-    setTimeout(() => setSheetsStatus("done"), 900);
   }
 
   function startEdit(question: MockQuestion) {
@@ -160,36 +152,7 @@ export function TestReview({ test, cls }: { test: MockTest; cls: MockClass }) {
                 Published — curriculum mapping is locked for this test.
               </p>
 
-              <div className="flex flex-col gap-4 rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate">
-                <div className="flex items-baseline justify-between">
-                  <h3 className="font-display text-lg text-ink dark:text-paper">
-                    OMR sheets
-                  </h3>
-                  <p className="text-sm text-ink/50 dark:text-paper/50">
-                    {gradedCount} student{gradedCount === 1 ? "" : "s"} graded
-                  </p>
-                </div>
-
-                {sheetsStatus === "done" ? (
-                  <p className="flex items-center gap-2 text-sm text-chart-green">
-                    <CheckIcon className="h-4 w-4" /> Uploaded — grading in progress.
-                  </p>
-                ) : (
-                  <>
-                    <p className="max-w-md text-sm text-ink/55 dark:text-paper/55">
-                      Upload one PDF containing every student&rsquo;s completed answer
-                      sheet for this test — no need to sort or label them first.
-                    </p>
-                    <Button
-                      onClick={handleUploadSheets}
-                      disabled={sheetsStatus === "uploading"}
-                      className="self-start"
-                    >
-                      {sheetsStatus === "uploading" ? "Uploading…" : "Upload OMR sheets"}
-                    </Button>
-                  </>
-                )}
-              </div>
+              <MarksheetFlow test={test} cls={cls} questions={questions} />
             </>
           )}
         </>

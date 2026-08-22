@@ -29,9 +29,11 @@ per-row created/failed result.
 ### Teacher
 
 The core product loop: publish a test with AI-suggested curriculum mapping, upload the
-whole class's OMR sheets as one PDF (per test, or from the test's own page), confirm a
-flagged low-confidence bubble read, then drill from the class-wide cumulative report
-into any individual student's own report.
+whole class's OMR sheets as one PDF, let grading process them, then review each
+student's answers — fix and save any flagged read, even correct a misread name — before
+generating the report. From there, confirm a flagged bubble read on an individual
+submission, and drill from the class-wide cumulative report into any student's own
+report.
 
 ![Teacher](docs/screenshots/03-teacher.png)
 
