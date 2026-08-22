@@ -208,3 +208,41 @@ CREATE TABLE answers (
     UNIQUE KEY uq_submission_question (submission_id, question_id),
     INDEX idx_answers_question (question_id)
 ) ENGINE=InnoDB;
+
+-- Generated reports, persisted so GET only ever reads — it never recomputes
+-- evidence or calls the LLM. POST /api/tests/{id}/report/generate is the only
+-- writer: it always recomputes from answers/question_node_map and overwrites
+-- the existing row for that test (ON DUPLICATE KEY UPDATE), no report history
+-- kept. node_accuracies/node_student_buckets/weak_nodes are stored as JSON,
+-- mirroring the ClassReport/StudentReport response models directly — nothing
+-- else in the app queries into individual node rows, so normalizing them out
+-- into their own tables would add joins with no current use.
+CREATE TABLE class_reports (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    test_id BIGINT UNSIGNED NOT NULL,
+    students_evaluated INT NOT NULL,
+    average_score_percent FLOAT NULL,
+    node_accuracies JSON NOT NULL,
+    node_student_buckets JSON NOT NULL,
+    summary TEXT NULL,
+    generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (test_id) REFERENCES tests(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_class_report_test (test_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE student_reports (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    test_id BIGINT UNSIGNED NOT NULL,
+    student_id BIGINT UNSIGNED NOT NULL,
+    student_name VARCHAR(255) NOT NULL,
+    score_correct INT NOT NULL,
+    score_total INT NOT NULL,
+    score_percent FLOAT NULL,
+    node_accuracies JSON NOT NULL,
+    weak_nodes JSON NOT NULL,
+    summary TEXT NULL,
+    generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (test_id) REFERENCES tests(id) ON DELETE CASCADE,
+    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_student_report (test_id, student_id)
+) ENGINE=InnoDB;
