@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-ink: #1e2a2f;
+  --color-paper: #faf6ec;
+  --color-correct: #34a76f;
+  --color-correct-dark: #278257;
+  --color-mark: #e4572e;
+  --color-chalk: #f0b429;
+  --color-slate: #232f35;
+
+  --color-chart-green: #31a06c;
+  --color-chart-amber: #b8860b;
+
+  --font-display: var(--font-fraunces);
+  --font-body: var(--font-manrope);
+  --font-utility: var(--font-plex-mono);
+}
+
+body {
+  font-feature-settings: "ss01" 1;
+}
+
+/* `color-scheme` alone doesn't reliably theme a native <select> popup's
+   background in Chromium — the popup can stay white while our own
+   dark:text-paper still lightens the option text, making it unreadable.
+   Setting background-color/color directly on <option> is what Chromium
+   actually honors for the popup list. */
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+select option {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+}
+
+.dark select option {
+  background-color: var(--color-slate);
+  color: var(--color-paper);
+}
+
+::selection {
+  background-color: var(--color-correct);
+  color: var(--color-ink);
+}
+
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+
+.bg-paper-rule {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 35px,
+    color-mix(in srgb, var(--color-ink) 6%, transparent) 35px,
+    color-mix(in srgb, var(--color-ink) 6%, transparent) 36px
+  );
+}
+
+.bg-chalk-dust {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--color-paper) 14%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 18px 18px;
+}
