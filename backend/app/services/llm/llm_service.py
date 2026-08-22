@@ -5,7 +5,14 @@ from typing import Protocol
 from openai import AsyncOpenAI
 
 from app.config.settings import settings
-from app.models.llm import BubbleJudgment, NodeMapping, QuestionToMap, TaxonomyNode
+from app.models.llm import (
+    BubbleJudgment,
+    ClassReportEvidence,
+    NodeMapping,
+    QuestionToMap,
+    StudentReportEvidence,
+    TaxonomyNode,
+)
 from app.utils.errors import ERRORS, AppError
 from app.utils.logger import get_logger
 from app.utils.result import Result, err, ok
@@ -21,6 +28,10 @@ class ILlmService(Protocol):
         self, crops: list[tuple[int, bytes]]
     ) -> Result[list[BubbleJudgment], "AppError"]: ...
     async def read_whole_sheet(self, image: bytes) -> Result[list[BubbleJudgment], "AppError"]: ...
+    async def phrase_class_report(self, evidence: ClassReportEvidence) -> Result[str, "AppError"]: ...
+    async def phrase_student_reports(
+        self, evidence: list[StudentReportEvidence]
+    ) -> Result[dict[int, str], "AppError"]: ...
 
 
 _SYSTEM_PROMPT = (
@@ -102,6 +113,31 @@ _WHOLE_SHEET_SYSTEM_PROMPT = (
 # Kept deliberately short — a longer prompt combined with an image and json_object mode
 # was observed to hang indefinitely on one OpenAI-compatible provider (NVIDIA NIM); the
 # same request with a short prompt returns normally. See omr-extraction-strategy.md.
+
+
+_CLASS_REPORT_SYSTEM_PROMPT = (
+    "You write a short teacher-facing summary of a class's test performance. You are "
+    "given already-computed evidence — average score and a list of the class's weakest "
+    "curriculum topics with their accuracy and verdict (needs_practice or weak). Your "
+    "only job is to phrase this evidence into 2-4 plain sentences a teacher can act on — "
+    "which topics need re-teaching, roughly how weak they are. Never invent a number, "
+    "topic, or student that isn't in the evidence, and never soften or second-guess a "
+    "verdict that's already been computed — you are phrasing the evidence, not judging "
+    'it.\n\nRespond with ONLY a JSON object: {"summary": "<2-4 sentences>"}.'
+)
+
+_STUDENT_REPORTS_SYSTEM_PROMPT = (
+    "You write a short student-facing summary of test performance, one per student. You "
+    "are given a batch of students, each with their score and their weakest curriculum "
+    "topics (accuracy + verdict: needs_practice or weak). For each student, write 1-3 "
+    "plain, encouraging sentences naming their weak topics and roughly how weak they "
+    "are. Never invent a number or topic not in that student's evidence, and never judge "
+    "or soften a verdict that's already been computed — you are only phrasing it. If a "
+    "student has no weak topics listed, write a short positive sentence about their "
+    "score instead.\n\n"
+    'Respond with ONLY a JSON object: {"summaries": [{"student_id": <id>, "summary": '
+    '"<1-3 sentences>"}, ...]}. Include exactly one entry per student you were given.'
+)
 
 
 def _parse_json_content(content: str) -> dict:
@@ -260,6 +296,71 @@ class OpenAiCompatibleLlmService:
             return err(ERRORS["LLM_SERVICE_ERROR"])  # missing, duplicate, or extra questions
 
         return ok(judgments)
+
+    async def phrase_class_report(self, evidence: ClassReportEvidence) -> Result[str, "AppError"]:
+        weak_block = "\n".join(
+            f"- {n.path}: {n.accuracy:.0%} accuracy ({n.verdict})" for n in evidence.weak_nodes
+        )
+        weak_block = weak_block or "(none — no topic fell below the needs-practice threshold)"
+        user_prompt = (
+            f"Students evaluated: {evidence.students_evaluated}\n"
+            f"Average score: {evidence.average_score_percent:.0%}\n"
+            f"Weakest topics:\n{weak_block}"
+        )
+        try:
+            response = await self._client.chat.completions.create(
+                model=settings.LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": _CLASS_REPORT_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            data = json.loads(response.choices[0].message.content)
+            return ok(str(data["summary"]))
+        except Exception:
+            logger.exception("phrase_class_report call failed")
+            return err(ERRORS["LLM_SERVICE_ERROR"])
+
+    async def phrase_student_reports(
+        self, evidence: list[StudentReportEvidence]
+    ) -> Result[dict[int, str], "AppError"]:
+        if not evidence:
+            return ok({})
+
+        blocks = []
+        for s in evidence:
+            weak_block = "\n".join(
+                f"  - {n.path}: {n.accuracy:.0%} accuracy ({n.verdict})" for n in s.weak_nodes
+            )
+            blocks.append(
+                f"Student {s.student_id} ({s.student_name}): score {s.score_percent:.0%}\n"
+                f"{weak_block if weak_block else '  (no weak topics)'}"
+            )
+        user_prompt = "\n\n".join(blocks)
+
+        try:
+            response = await self._client.chat.completions.create(
+                model=settings.LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": _STUDENT_REPORTS_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            data = json.loads(response.choices[0].message.content)
+            summaries = {int(s["student_id"]): str(s["summary"]) for s in data["summaries"]}
+        except Exception:
+            logger.exception("phrase_student_reports call failed")
+            return err(ERRORS["LLM_SERVICE_ERROR"])
+
+        expected = {s.student_id for s in evidence}
+        if set(summaries.keys()) != expected:
+            return err(ERRORS["LLM_SERVICE_ERROR"])  # missing, duplicate, or extra students
+
+        return ok(summaries)
 
 
 def get_llm_service() -> ILlmService:

@@ -145,18 +145,24 @@ fields at all in this schema; subjective test setup is its own future PR
 ### 2.5 Submissions — `/api/tests/{test_id}/submissions`, `/api/submissions`
 
 Implements `../omr-grading.md` § Scan, Upload & Processing — MCQ/OMR only, subjective
-(handwriting OCR) deferred with the rest of `../subjective-grading.md`. **v1 is
-login-only identification** — no QR, no roll-number, no teacher bulk-upload; see
-`../accounts-and-roster.md` § Future / Phase 2 for what comes back later and why it's
-deferred, not dropped.
+(handwriting OCR) deferred with the rest of `../subjective-grading.md`. Superseded from
+the original login-only v1 design by teacher bulk-upload with OCR name-matching (see
+`../accounts-and-roster.md` § Student Identification on Upload). Extraction results are
+never final the instant they're written — every submission from a bulk upload lands as
+`status = 'pending'` (a draft, invisible to reports), and the teacher reviews/edits
+before an explicit Save finalizes the batch. See § 4c below for the full pipeline.
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| POST | `/api/tests/{test_id}/submissions` | student | Upload own sheet — a single image (in-app guided capture, or a gallery-picked image); v1 is single-page OMR only. `student_id` = caller's own id — this is the only identification path in v1 |
-| GET | `/api/submissions/{id}` | teacher, or the owning student | Detail: status, per-question answers, `needs_review` flags |
-| PUT | `/api/submissions/{id}/answers/{q_id}` | teacher | Confirm/correct a flagged (`needs_review`) bubble read |
+| POST | `/api/tests/{test_id}/submissions/bulk` | teacher (assigned), admin | One PDF, every student's sheet, one page each. Runs CV+AI extraction (§4c) and OCR name-matching per page; every created submission is `status = 'pending'` regardless of match/confidence outcome — nothing is final yet |
+| GET | `/api/tests/{test_id}/submissions?status=` | teacher (assigned), admin | List submissions for a test, optionally filtered by status (e.g. `?status=pending` for the review queue) |
+| GET | `/api/submissions/{id}` | teacher (assigned), admin, or the owning student | Detail: status, per-question answers (with `question_number`/`correct_option` joined in), `needs_review` flags |
+| PUT | `/api/submissions/{id}/answers/{q_id}` | teacher (assigned), admin | Correct one answer's selected option — recomputes `is_correct` server-side, clears `needs_review`. Works both pre- and post-save |
+| PATCH | `/api/submissions/{id}/student` | teacher (assigned), admin | Body `{student_id, raw_extracted_name?}` — reassign the matched student (when OCR matched wrong or not at all) and optionally correct the displayed OCR text itself, since handwriting OCR can't be fully trusted |
+| POST | `/api/tests/{test_id}/submissions/save` | teacher (assigned), admin | The one "Save" action — finalizes every still-`pending` submission for the test to `processed`/`needs_review` (same unmatched-or-flagged rule as before). Report generation (§2.6) already blocks on `pending`/`needs_review`, so it naturally can't run until this has been called and everything's clean |
 
-**Deferred to Phase 2** (not built in v1): `POST .../submissions/bulk` (teacher bulk-upload with QR/roll-number matching) and `PUT /api/submissions/{id}/match` (manual-match-to-roster) — both depend on sheet-based identification that v1 doesn't have.
+**Deferred** (not built): QR/roll-number-based identification — see
+`../accounts-and-roster.md` § Future / Phase 2.
 
 ### 2.6 Reports — `/api/students/{id}/report`, `/api/classes/{id}/report`
 
@@ -266,18 +272,29 @@ POST /tests/{test_id}/submissions/bulk  (teacher, one PDF — every student's sh
   § Student Identification on Upload)
         │
         │  matched → student_id set        no match → student_id = NULL,
-        │                                    raw_extracted_name kept for manual
-        │                                    resolution, status = needs_review
+        │                                    raw_extracted_name kept for review
         ▼
-  compare bubble answers to questions.correct_option (plain comparison, no AI)
+  compare bubble answers to questions.correct_option (plain comparison, no AI) →
+  per-answer needs_review flags
         │
         ▼
-  ambiguous/failed bubble read, or unmatched name?  →  needs_review = true
-        │                                                (submission and/or per-answer)
-        ▼
-  submissions + answers rows written — answers reference question_id only,
+  submissions + answers rows written with status = 'pending' — ALWAYS, regardless of
+  match/confidence outcome; nothing is final yet. Answers reference question_id only,
   never write to curriculum_nodes
   (database-design.md § Design Decisions — "Results never touch the taxonomy")
+        │
+        ▼
+  Teacher review (§2.5): GET .../submissions?status=pending → GET .../submissions/{id}
+  for detail → PUT .../answers/{q_id} and/or PATCH .../student to correct anything
+        │
+        ▼
+  POST /tests/{test_id}/submissions/save  ← the one Save action
+        │
+        ▼
+  every still-'pending' submission for the test flips to its final status:
+  needs_review if student_id is still null or any answer is still flagged, else
+  processed — same rule the review-time edits already used to decide when to
+  auto-finalize a submission that had already been saved once
 ```
 
 **Deferred** (`../accounts-and-roster.md` § Future — Roll Number / QR as a Stronger
