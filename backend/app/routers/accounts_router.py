@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 from app.middleware.auth import get_current_admin
 from app.models.student import BulkStudentsRequest, to_student_view
 from app.models.teacher import CreateTeacherData, to_teacher_view
 from app.repositories.class_repository import ClassRepository
+from app.repositories.student_repository import StudentRepository
 from app.repositories.teacher_repository import TeacherRepository
 from app.types.token import TokenData
 from app.utils.password import hash_password, password_from_dob
@@ -28,6 +29,32 @@ async def create_teacher(
     return JSONResponse(
         status_code=201, content=success_response(view.model_dump(), "Teacher created successfully")
     )
+
+
+@router.get("/teachers")
+async def list_teachers(
+    cursor: int | None = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    search: str | None = Query(None),
+    current_admin: TokenData = Depends(get_current_admin),
+) -> JSONResponse:
+    result = TeacherRepository.list_all(cursor, limit, search)
+    if result.is_err():
+        return _err(result.error)
+    return JSONResponse(status_code=200, content=success_response(result.value))
+
+
+@router.get("/students")
+async def list_students(
+    cursor: int | None = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    search: str | None = Query(None),
+    current_admin: TokenData = Depends(get_current_admin),
+) -> JSONResponse:
+    result = StudentRepository.list_all(cursor, limit, search)
+    if result.is_err():
+        return _err(result.error)
+    return JSONResponse(status_code=200, content=success_response(result.value))
 
 
 @router.post("/students/bulk")
