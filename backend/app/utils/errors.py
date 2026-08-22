@@ -62,6 +62,11 @@ ERRORS: dict[str, AppError] = {
     "SUBMISSION_PDF_INVALID": AppError("Could not read the submitted PDF", 60004, 422),
     # ─── Reports (7xxxx) ─────────────────────────────────────────────────
     "NO_RESULTS_YET": AppError("No graded results yet for this scope", 70001, 404),
+    "TEST_GRADING_INCOMPLETE": AppError(
+        "Some submissions for this test still need review before a report can be generated",
+        70002,
+        409,
+    ),
     # ─── Files / Storage (8xxxx) ────────────────────────────────────────
     "FILE_TOO_LARGE": AppError("File is too large", 80001, 413),
     "INVALID_FILE_TYPE": AppError("Unsupported file type", 80002, 422),

@@ -17,6 +17,7 @@ from app.routers import (
     book_router,
     class_router,
     health_router,
+    report_router,
     subject_router,
     submission_router,
     test_router,
@@ -60,3 +61,4 @@ app.include_router(subject_router.router)
 app.include_router(book_router.router)
 app.include_router(test_router.router)
 app.include_router(submission_router.router)
+app.include_router(report_router.router)

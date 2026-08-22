@@ -25,3 +25,22 @@ class BubbleJudgment(BaseModel):
     question_number: int
     selected_option: str | None
     confidence: float
+
+
+class WeakNodeEvidence(BaseModel):
+    path: str
+    accuracy: float
+    verdict: str
+
+
+class ClassReportEvidence(BaseModel):
+    students_evaluated: int
+    average_score_percent: float
+    weak_nodes: list[WeakNodeEvidence]
+
+
+class StudentReportEvidence(BaseModel):
+    student_id: int
+    student_name: str
+    score_percent: float
+    weak_nodes: list[WeakNodeEvidence]

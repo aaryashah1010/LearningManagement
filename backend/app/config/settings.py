@@ -50,5 +50,12 @@ class Settings(BaseSettings):
     S3_ACCESS_KEY_ID: str = ""
     S3_SECRET_ACCESS_KEY: str = ""
 
+    # Report generation — node verdict thresholds (omr-grading.md §22 example values).
+    # Below REPORT_MIN_QUESTIONS_FOR_VERDICT questions, a node is "insufficient_data"
+    # rather than a confident verdict, regardless of accuracy.
+    REPORT_MIN_QUESTIONS_FOR_VERDICT: int = 3
+    REPORT_STRONG_THRESHOLD: float = 0.8
+    REPORT_NEEDS_PRACTICE_THRESHOLD: float = 0.6
+
 
 settings = Settings()
