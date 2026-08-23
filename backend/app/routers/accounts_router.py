@@ -8,6 +8,7 @@ from app.repositories.class_repository import ClassRepository
 from app.repositories.student_repository import StudentRepository
 from app.repositories.teacher_repository import TeacherRepository
 from app.types.token import TokenData
+from app.utils.errors import ERRORS
 from app.utils.password import hash_password, password_from_dob
 from app.utils.responses import error_response, success_response
 
@@ -67,7 +68,29 @@ async def create_students_bulk(
 
     created = []
     failed = []
+    seen_emails: set[str] = set()
+    seen_phones: set[str] = set()
     for entry in body.students:
+        # Two rows in the same batch sharing an email/phone would both resolve to the
+        # same matched-or-created student (enroll_new_or_matched_student's dedup is
+        # keyed on contact, not row identity), showing that one student twice in
+        # `created` with no explanation. Catch it here instead, before either row
+        # reaches the database.
+        if (entry.email and entry.email in seen_emails) or (entry.phone and entry.phone in seen_phones):
+            error = ERRORS["EMAIL_OR_PHONE_TAKEN"]
+            failed.append(
+                {
+                    "name": entry.name,
+                    "code": error.code,
+                    "message": "Duplicate email or phone within this batch",
+                }
+            )
+            continue
+        if entry.email:
+            seen_emails.add(entry.email)
+        if entry.phone:
+            seen_phones.add(entry.phone)
+
         password_hash = hash_password(password_from_dob(entry.date_of_birth))
         result = ClassRepository.enroll_new_or_matched_student(
             body.class_id, entry.name, entry.email, entry.phone, entry.date_of_birth, password_hash
