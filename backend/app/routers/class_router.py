@@ -32,12 +32,13 @@ async def create_class(
 async def list_classes(
     cursor: int | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
+    search: str | None = Query(None),
     current_user: TokenData = Depends(get_current_teacher_or_admin),
 ) -> JSONResponse:
     if current_user.role == "admin":
-        result = ClassRepository.list_all(cursor, limit)
+        result = ClassRepository.list_all(cursor, limit, search)
     else:
-        result = ClassRepository.list_assigned_classes(current_user.id, cursor, limit)
+        result = ClassRepository.list_assigned_classes(current_user.id, cursor, limit, search)
     if result.is_err():
         return _err(result.error)
     return JSONResponse(status_code=200, content=success_response(result.value))
@@ -62,12 +63,13 @@ async def list_enrollments(
     class_id: int,
     cursor: int | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
+    search: str | None = Query(None),
     current_user: TokenData = Depends(get_current_teacher_or_admin),
 ) -> JSONResponse:
     scoped = ensure_class_assigned_or_admin(class_id, current_user)
     if scoped.is_err():
         return _err(scoped.error)
-    result = ClassRepository.list_enrollments(class_id, cursor, limit)
+    result = ClassRepository.list_enrollments(class_id, cursor, limit, search)
     if result.is_err():
         return _err(result.error)
     return JSONResponse(status_code=200, content=success_response(result.value))
@@ -103,6 +105,19 @@ async def remove_enrollment(
     if result.is_err():
         return _err(result.error)
     return JSONResponse(status_code=200, content=success_response(None, "Student removed from class"))
+
+
+@router.get("/{class_id}/teachers")
+async def list_class_teachers(
+    class_id: int, current_user: TokenData = Depends(get_current_teacher_or_admin)
+) -> JSONResponse:
+    scoped = ensure_class_assigned_or_admin(class_id, current_user)
+    if scoped.is_err():
+        return _err(scoped.error)
+    result = ClassRepository.list_assigned_teachers(class_id)
+    if result.is_err():
+        return _err(result.error)
+    return JSONResponse(status_code=200, content=success_response([t.model_dump() for t in result.value]))
 
 
 @router.post("/{class_id}/teachers")

@@ -6,6 +6,7 @@ from mysql.connector.errors import IntegrityError
 from app.database.pool import execute, fetch_all, fetch_one, transaction
 from app.models.class_ import Class, ClassDetail
 from app.models.student import Student, StudentView
+from app.models.teacher import TeacherView
 from app.types.pagination import PageInfo, Paginated
 from app.utils.errors import ERRORS, AppError
 from app.utils.logger import get_logger
@@ -22,7 +23,9 @@ class IClassRepository(Protocol):
     def create(self, name: str) -> Result[Class, AppError]: ...
     def find_by_id(self, class_id: int) -> Result[Class, AppError]: ...
     def detail(self, class_id: int) -> Result[ClassDetail, AppError]: ...
-    def list_all(self, cursor: int | None, limit: int) -> Result[Paginated[Class], AppError]: ...
+    def list_all(
+        self, cursor: int | None, limit: int, search: str | None = None
+    ) -> Result[Paginated[Class], AppError]: ...
     def enroll(self, class_id: int, student_id: int) -> Result[None, AppError]: ...
     def enroll_new_or_matched_student(
         self,
@@ -39,14 +42,15 @@ class IClassRepository(Protocol):
         self, from_class_id: int, to_class_id: int, student_id: int
     ) -> Result[None, AppError]: ...
     def list_enrollments(
-        self, class_id: int, cursor: int | None, limit: int
+        self, class_id: int, cursor: int | None, limit: int, search: str | None = None
     ) -> Result[Paginated[StudentView], AppError]: ...
     def list_all_enrollments(self, class_id: int) -> Result[list[StudentView], AppError]: ...
     def assign_teacher(self, class_id: int, teacher_id: int) -> Result[None, AppError]: ...
     def unassign_teacher(self, class_id: int, teacher_id: int) -> Result[None, AppError]: ...
     def is_teacher_assigned(self, class_id: int, teacher_id: int) -> Result[bool, AppError]: ...
+    def list_assigned_teachers(self, class_id: int) -> Result[list[TeacherView], AppError]: ...
     def list_assigned_classes(
-        self, teacher_id: int, cursor: int | None, limit: int
+        self, teacher_id: int, cursor: int | None, limit: int, search: str | None = None
     ) -> Result[Paginated[Class], AppError]: ...
 
 
@@ -84,11 +88,19 @@ class ClassRepositoryImpl(IClassRepository):
             logger.exception("Error fetching class detail")
             return err(ERRORS["DATABASE_ERROR"])
 
-    def list_all(self, cursor: int | None, limit: int) -> Result[Paginated[Class], AppError]:
+    def list_all(
+        self, cursor: int | None, limit: int, search: str | None = None
+    ) -> Result[Paginated[Class], AppError]:
         try:
+            where = ["id > %s"]
+            params: list = [cursor or 0]
+            if search:
+                where.append("name LIKE %s")
+                params.append(f"%{search}%")
+            params.append(limit + 1)
             rows = fetch_all(
-                "SELECT * FROM classes WHERE id > %s ORDER BY id ASC LIMIT %s",
-                (cursor or 0, limit + 1),
+                f"SELECT * FROM classes WHERE {' AND '.join(where)} ORDER BY id ASC LIMIT %s",
+                tuple(params),
             )
             has_next = len(rows) > limit
             page_rows = rows[:limit]
@@ -225,14 +237,20 @@ class ClassRepositoryImpl(IClassRepository):
             return err(ERRORS["DATABASE_ERROR"])
 
     def list_enrollments(
-        self, class_id: int, cursor: int | None, limit: int
+        self, class_id: int, cursor: int | None, limit: int, search: str | None = None
     ) -> Result[Paginated[StudentView], AppError]:
         try:
+            where = ["e.class_id = %s", "s.id > %s"]
+            params: list = [class_id, cursor or 0]
+            if search:
+                where.append("s.name LIKE %s")
+                params.append(f"%{search}%")
+            params.append(limit + 1)
             rows = fetch_all(
                 "SELECT s.id, s.name, s.email, s.phone FROM students s "
                 "JOIN class_enrollments e ON e.student_id = s.id "
-                "WHERE e.class_id = %s AND s.id > %s ORDER BY s.id ASC LIMIT %s",
-                (class_id, cursor or 0, limit + 1),
+                f"WHERE {' AND '.join(where)} ORDER BY s.id ASC LIMIT %s",
+                tuple(params),
             )
             has_next = len(rows) > limit
             page_rows = rows[:limit]
@@ -303,15 +321,34 @@ class ClassRepositoryImpl(IClassRepository):
             logger.exception("Error checking teacher assignment")
             return err(ERRORS["DATABASE_ERROR"])
 
+    def list_assigned_teachers(self, class_id: int) -> Result[list[TeacherView], AppError]:
+        try:
+            rows = fetch_all(
+                "SELECT t.id, t.name, t.email, t.role FROM teachers t "
+                "JOIN class_teachers ct ON ct.teacher_id = t.id "
+                "WHERE ct.class_id = %s ORDER BY t.id ASC",
+                (class_id,),
+            )
+            return ok([TeacherView(**r) for r in rows])
+        except Exception:
+            logger.exception("Error listing assigned teachers")
+            return err(ERRORS["DATABASE_ERROR"])
+
     def list_assigned_classes(
-        self, teacher_id: int, cursor: int | None, limit: int
+        self, teacher_id: int, cursor: int | None, limit: int, search: str | None = None
     ) -> Result[Paginated[Class], AppError]:
         try:
+            where = ["ct.teacher_id = %s", "c.id > %s"]
+            params: list = [teacher_id, cursor or 0]
+            if search:
+                where.append("c.name LIKE %s")
+                params.append(f"%{search}%")
+            params.append(limit + 1)
             rows = fetch_all(
                 "SELECT c.* FROM classes c "
                 "JOIN class_teachers ct ON ct.class_id = c.id "
-                "WHERE ct.teacher_id = %s AND c.id > %s ORDER BY c.id ASC LIMIT %s",
-                (teacher_id, cursor or 0, limit + 1),
+                f"WHERE {' AND '.join(where)} ORDER BY c.id ASC LIMIT %s",
+                tuple(params),
             )
             has_next = len(rows) > limit
             page_rows = rows[:limit]
