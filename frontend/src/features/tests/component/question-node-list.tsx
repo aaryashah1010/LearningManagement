@@ -1,42 +1,54 @@
 "use client";
 
 import { useState } from "react";
+import { Combobox } from "@/components/ui/combobox";
 import { useCurriculumOptions, useQuestions, useSetQuestionNode } from "../hooks";
 
 function NodePicker({
   testId,
   questionId,
   bookId,
+  currentNodeId,
+  currentPath,
 }: {
   testId: number;
   questionId: number;
   bookId: number;
+  currentNodeId: number | null;
+  currentPath: string | null;
 }) {
-  const { nodes } = useCurriculumOptions(bookId);
+  const { nodes, isLoading } = useCurriculumOptions(bookId);
   const { setQuestionNode, isSettingNode } = useSetQuestionNode(testId);
-  const [value, setValue] = useState("");
+  const [search, setSearch] = useState("");
 
-  async function handleChange(nodeId: string) {
-    setValue(nodeId);
-    const node = nodes.find((n) => n.id === Number(nodeId));
+  const filtered = search
+    ? nodes.filter((n) => n.path.toLowerCase().includes(search.toLowerCase()))
+    : nodes;
+
+  async function handleChange(nodeId: number) {
+    const node = nodes.find((n) => n.id === nodeId);
     if (!node) return;
+    setSearch("");
     await setQuestionNode({ questionId, nodeId: node.id, path: node.path });
   }
 
   return (
-    <select
-      value={value}
-      onChange={(e) => handleChange(e.target.value)}
-      disabled={isSettingNode}
-      className="w-full max-w-[220px] self-start truncate rounded-lg border-b-2 border-ink/15 bg-transparent px-1 pb-1 text-xs text-ink focus:border-correct focus:outline-none disabled:opacity-50 dark:border-paper/20 dark:text-paper"
-    >
-      <option value="">Change topic…</option>
-      {nodes.map((n) => (
-        <option key={n.id} value={n.id}>
-          {n.path}
-        </option>
-      ))}
-    </select>
+    <div className="w-full self-start sm:max-w-xs">
+      <Combobox
+        value={currentNodeId}
+        onChange={handleChange}
+        items={filtered.map((n) => ({ id: n.id, label: n.path }))}
+        search={search}
+        onSearchChange={setSearch}
+        isLoading={isLoading}
+        isFetchingNextPage={false}
+        hasNextPage={false}
+        onLoadMore={() => {}}
+        placeholder="Change topic…"
+        disabled={isSettingNode}
+        selectedLabel={currentPath}
+      />
+    </div>
   );
 }
 
@@ -77,7 +89,13 @@ export function QuestionNodeList({ testId, bookId }: { testId: number; bookId: n
               {q.node?.path ? ` · ${q.node.path}` : " · unmapped"}
             </p>
           </div>
-          <NodePicker testId={testId} questionId={q.id} bookId={bookId} />
+          <NodePicker
+            testId={testId}
+            questionId={q.id}
+            bookId={bookId}
+            currentNodeId={q.node?.id ?? null}
+            currentPath={q.node?.path ?? null}
+          />
         </li>
       ))}
     </ul>
