@@ -33,11 +33,13 @@ const TEACHER_NAV_ITEMS: NavItemConfig[] = [
   { href: "/teacher/tests", label: "Tests", icon: TestsIcon },
   { href: "/teacher/submissions", label: "Submissions", icon: SubmissionsIcon },
   { href: "/teacher/reports", label: "Reports", icon: ReportsIcon },
+  { href: "/teacher/monthly-reports", label: "Monthly Reports", icon: ReportsIcon },
 ];
 
 const STUDENT_NAV_ITEMS: NavItemConfig[] = [
   { href: "/student/tests", label: "Tests", icon: TestsIcon },
   { href: "/student/reports", label: "My Report", icon: ReportsIcon },
+  { href: "/student/monthly-report", label: "Monthly Report", icon: ReportsIcon },
 ];
 
 // Icon components are function values, which can't cross the Server->Client

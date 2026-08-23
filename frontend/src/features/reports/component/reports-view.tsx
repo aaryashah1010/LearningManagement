@@ -4,23 +4,16 @@ import { useState } from "react";
 import { AlertIcon, ChevronIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
-import { useCumulativeReport } from "../hooks";
-import { useReportsPageController } from "../hooks/useReportsPageController";
+import { PillTabs } from "@/components/ui/pill-tabs";
+import { useReportsPageController, type ReportTab } from "../hooks/useReportsPageController";
 import type { StudentReport } from "../types";
 import { NodeAccuracyTable, pct } from "./node-accuracy-table";
 
-const now = new Date();
-const CURRENT_YEAR = now.getFullYear();
-const CURRENT_MONTH = now.getMonth() + 1;
+const TABS: ReportTab[] = ["class", "student"];
+const TAB_LABEL: Record<ReportTab, string> = { class: "Class", student: "Student" };
 
-function StudentReportRow({ report, bookId }: { report: StudentReport; bookId: number | null }) {
+function StudentReportRow({ report }: { report: StudentReport }) {
   const [expanded, setExpanded] = useState(false);
-  const { report: cumulativeReport, isLoading: isCumulativeLoading } = useCumulativeReport(
-    expanded ? report.student_id : 0,
-    bookId,
-    CURRENT_YEAR,
-    CURRENT_MONTH
-  );
 
   return (
     <li className="py-3">
@@ -39,36 +32,13 @@ function StudentReportRow({ report, bookId }: { report: StudentReport; bookId: n
       </button>
 
       {expanded && (
-        <div className="mt-3 flex flex-col gap-4 rounded-xl bg-ink/[0.02] p-4 dark:bg-paper/[0.03]">
-          <div>
-            {report.summary && <p className="text-sm text-ink/70 dark:text-paper/70">{report.summary}</p>}
-            {report.weak_nodes.length === 0 ? (
-              <p className="text-sm text-ink/50 dark:text-paper/50">No weak topics.</p>
-            ) : (
-              <NodeAccuracyTable nodes={report.weak_nodes} />
-            )}
-          </div>
-
-          <div className="border-t border-ink/8 pt-4 dark:border-paper/8">
-            <p className="font-utility text-xs font-medium uppercase tracking-[0.14em] text-ink/40 dark:text-paper/40">
-              This month
-            </p>
-            {isCumulativeLoading ? (
-              <div className="mt-2 h-12 w-full animate-pulse rounded-lg bg-ink/5 dark:bg-paper/5" />
-            ) : cumulativeReport ? (
-              <div className="mt-2 flex flex-col gap-2">
-                <p className="text-sm text-ink dark:text-paper">
-                  {pct(cumulativeReport.score_percent)} across {cumulativeReport.tests_included} test
-                  {cumulativeReport.tests_included === 1 ? "" : "s"}
-                </p>
-                {cumulativeReport.weak_nodes.length > 0 && (
-                  <NodeAccuracyTable nodes={cumulativeReport.weak_nodes} />
-                )}
-              </div>
-            ) : (
-              <p className="mt-2 text-sm text-ink/50 dark:text-paper/50">No cumulative report yet.</p>
-            )}
-          </div>
+        <div className="mt-3 rounded-xl bg-ink/[0.02] p-4 dark:bg-paper/[0.03]">
+          {report.summary && <p className="text-sm text-ink/70 dark:text-paper/70">{report.summary}</p>}
+          {report.weak_nodes.length === 0 ? (
+            <p className="text-sm text-ink/50 dark:text-paper/50">No weak topics.</p>
+          ) : (
+            <NodeAccuracyTable nodes={report.weak_nodes} />
+          )}
         </div>
       )}
     </li>
@@ -77,6 +47,7 @@ function StudentReportRow({ report, bookId }: { report: StudentReport; bookId: n
 
 export function ReportsView() {
   const controller = useReportsPageController();
+  const { activeTab, setActiveTab } = controller;
 
   if (controller.isClassesLoading) {
     return <div className="h-10 w-64 animate-pulse rounded-lg bg-ink/5 dark:bg-paper/5" />;
@@ -86,8 +57,9 @@ export function ReportsView() {
     return <p className="text-sm text-ink/50 dark:text-paper/50">No classes assigned to you yet.</p>;
   }
 
-  const classReport = controller.report?.class_report;
-  const studentReports = controller.report?.student_reports ?? [];
+  const classReport = controller.classReport;
+  const studentReports = controller.studentReports;
+  const { isClassReportLoading, isStudentReportsLoading } = controller;
 
   return (
     <div className="flex flex-col gap-8">
@@ -148,72 +120,54 @@ export function ReportsView() {
         </p>
       )}
 
-      {classReport && (
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.3fr_1fr]">
-          <div className="rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate">
-            <h3 className="font-display text-lg text-ink dark:text-paper">Topic accuracy</h3>
-            <div className="mt-4">
-              <NodeAccuracyTable nodes={classReport.node_accuracies} />
-            </div>
-          </div>
+      <PillTabs tabs={TABS} active={activeTab} onChange={setActiveTab} label={(tab) => TAB_LABEL[tab]} className="self-start" />
 
-          <div className="flex flex-col gap-4 rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate">
-            <div>
-              <p className="font-utility text-xs font-medium uppercase tracking-[0.14em] text-ink/40 dark:text-paper/40">
-                Class average
-              </p>
-              <p className="mt-1 font-display text-3xl text-ink dark:text-paper">
+      {activeTab === "class" && isClassReportLoading && (
+        <div className="h-40 w-full animate-pulse rounded-2xl bg-ink/5 dark:bg-paper/5" />
+      )}
+
+      {activeTab === "class" && !isClassReportLoading && classReport && (
+        <div className="rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h3 className="font-display text-lg text-ink dark:text-paper">Topic accuracy</h3>
+            <p className="text-sm text-ink/55 dark:text-paper/55">
+              <span className="font-display text-2xl text-ink dark:text-paper">
                 {pct(classReport.average_score_percent)}
-              </p>
-              <p className="mt-1 text-sm text-ink/55 dark:text-paper/55">
-                {classReport.students_evaluated} students evaluated
-              </p>
-            </div>
-            {classReport.summary && (
-              <p className="text-sm text-ink/70 dark:text-paper/70">{classReport.summary}</p>
-            )}
+              </span>{" "}
+              class average · {classReport.students_evaluated} students evaluated
+            </p>
+          </div>
+          {classReport.summary && (
+            <p className="mt-2 text-sm text-ink/70 dark:text-paper/70">{classReport.summary}</p>
+          )}
+          <div className="mt-4">
+            <NodeAccuracyTable nodes={classReport.node_accuracies} />
           </div>
         </div>
       )}
 
-      {studentReports.length > 0 && (
+      {activeTab === "class" && !isClassReportLoading && !classReport && (
+        <p className="text-sm text-ink/50 dark:text-paper/50">No report generated for this test yet.</p>
+      )}
+
+      {activeTab === "student" && isStudentReportsLoading && (
+        <div className="h-24 w-full animate-pulse rounded-2xl bg-ink/5 dark:bg-paper/5" />
+      )}
+
+      {activeTab === "student" && !isStudentReportsLoading && studentReports.length > 0 && (
         <div className="rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate">
           <h3 className="font-display text-lg text-ink dark:text-paper">Students</h3>
           <ul className="mt-2 flex flex-col divide-y divide-ink/8 dark:divide-paper/8">
             {studentReports.map((report) => (
-              <StudentReportRow key={report.student_id} report={report} bookId={controller.bookId} />
+              <StudentReportRow key={report.student_id} report={report} />
             ))}
           </ul>
         </div>
       )}
 
-      <div className="rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate">
-        <h3 className="font-display text-lg text-ink dark:text-paper">Class — this month</h3>
-        {controller.isCumulativeLoading ? (
-          <div className="mt-4 h-24 w-full animate-pulse rounded-xl bg-ink/5 dark:bg-paper/5" />
-        ) : controller.classCumulativeReport ? (
-          <div className="mt-4 grid grid-cols-1 gap-6 xl:grid-cols-[1.3fr_1fr]">
-            <NodeAccuracyTable nodes={controller.classCumulativeReport.node_accuracies} />
-            <div className="flex flex-col gap-2">
-              <p className="font-display text-3xl text-ink dark:text-paper">
-                {pct(controller.classCumulativeReport.average_score_percent)}
-              </p>
-              <p className="text-sm text-ink/55 dark:text-paper/55">
-                {controller.classCumulativeReport.students_evaluated} students evaluated
-              </p>
-              {controller.classCumulativeReport.summary && (
-                <p className="text-sm text-ink/70 dark:text-paper/70">
-                  {controller.classCumulativeReport.summary}
-                </p>
-              )}
-            </div>
-          </div>
-        ) : (
-          <p className="mt-2 text-sm text-ink/50 dark:text-paper/50">
-            No cumulative report for this month yet.
-          </p>
-        )}
-      </div>
+      {activeTab === "student" && !isStudentReportsLoading && studentReports.length === 0 && (
+        <p className="text-sm text-ink/50 dark:text-paper/50">No report generated for this test yet.</p>
+      )}
     </div>
   );
 }

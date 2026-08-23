@@ -5,6 +5,7 @@ import { useState } from "react";
 import { AlertIcon, CheckIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
+import { PillTabs } from "@/components/ui/pill-tabs";
 import { RequestError } from "@/lib/api";
 import { STATUS_TABS, useSubmissionsQueueController } from "../hooks/useSubmissionsQueueController";
 import type { SubmissionStatus } from "../types";
@@ -91,22 +92,12 @@ export function SubmissionsQueue({ initialTestId }: { initialTestId: number | nu
       {controller.testId && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex gap-1 rounded-full border border-ink/10 p-1 dark:border-paper/10">
-              {STATUS_TABS.map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => controller.setStatusTab(tab)}
-                  className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
-                    controller.statusTab === tab
-                      ? "bg-correct/15 text-ink dark:text-paper"
-                      : "text-ink/55 hover:bg-ink/5 dark:text-paper/55 dark:hover:bg-paper/10"
-                  }`}
-                >
-                  {STATUS_LABEL[tab]}
-                </button>
-              ))}
-            </div>
+            <PillTabs
+              tabs={STATUS_TABS}
+              active={controller.statusTab}
+              onChange={controller.setStatusTab}
+              label={(tab) => STATUS_LABEL[tab]}
+            />
 
             <Button type="button" variant="ghost" onClick={handleSave} disabled={controller.isSaving}>
               {controller.isSaving ? "Saving…" : "Save batch"}
