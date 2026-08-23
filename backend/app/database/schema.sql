@@ -246,3 +246,31 @@ CREATE TABLE student_reports (
     FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
     UNIQUE KEY uq_student_report (test_id, student_id)
 ) ENGINE=InnoDB;
+
+-- A student's rollup across every test on one book within one calendar month,
+-- keyed by tests.created_at (not published_at, which is nullable and would
+-- silently exclude a test from its own bucket). Scoped per book, not subject:
+-- curriculum_nodes is a fresh tree per book, so summing node accuracies
+-- across two books would mix unrelated node ids together.
+-- Recomputed, not incremented, on every generate for this book/month — sums
+-- whatever student_reports rows currently exist, so a regenerated test just
+-- re-sums the updated set instead of risking double-counting.
+CREATE TABLE student_cumulative_reports (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    student_id BIGINT UNSIGNED NOT NULL,
+    book_id BIGINT UNSIGNED NOT NULL,
+    report_year SMALLINT UNSIGNED NOT NULL,
+    report_month TINYINT UNSIGNED NOT NULL,
+    student_name VARCHAR(255) NOT NULL,
+    tests_included INT NOT NULL,
+    score_correct INT NOT NULL,
+    score_total INT NOT NULL,
+    score_percent FLOAT NULL,
+    node_accuracies JSON NOT NULL,
+    weak_nodes JSON NOT NULL,
+    summary TEXT NULL,
+    generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+    FOREIGN KEY (book_id) REFERENCES ncert_books(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_student_cumulative (student_id, book_id, report_year, report_month)
+) ENGINE=InnoDB;

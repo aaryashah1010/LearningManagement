@@ -10,6 +10,7 @@ from app.models.curriculum_node import ChapterNode
 from app.models.llm import ClassReportEvidence, StudentReportEvidence, WeakNodeEvidence
 from app.models.report import (
     ClassReport,
+    CumulativeReport,
     NodeAccuracy,
     NodeVerdict,
     StudentNodeBucket,
@@ -26,7 +27,7 @@ from app.utils.errors import ERRORS, AppError
 from app.utils.logger import get_logger
 from app.utils.responses import error_response, success_response
 from app.utils.result import Result, err, ok
-from app.utils.scoping import ensure_class_assigned_or_admin
+from app.utils.scoping import ensure_class_assigned_or_admin, ensure_shares_class_with_student_or_admin
 
 router = APIRouter(tags=["reports"])
 logger = get_logger("report_router")
@@ -47,6 +48,12 @@ def _ensure_test_scoped(test_id: int, current_user: TokenData):
     if scoped.is_err():
         return scoped
     return test_result
+
+
+def _cumulative_period(test: Test) -> tuple[int, int]:
+    # Single source of truth for the cumulative period boundary — keep in sync with the
+    # YEAR()/MONTH() filter in ReportRepository.get_student_reports_for_period.
+    return test.created_at.year, test.created_at.month
 
 
 @dataclass
@@ -297,6 +304,68 @@ async def _add_student_summaries(
         logger.warning("Student report narratives failed for test %s: %s", test_id, result.error.message)
 
 
+def _build_cumulative_report(
+    student_id: int,
+    student_name: str,
+    book_id: int,
+    year: int,
+    month: int,
+    period_reports: list[StudentReport],
+    node_index: dict[int, _NodeMeta],
+) -> CumulativeReport:
+    # period_reports is re-fetched fresh each call, so this naturally re-sums rather
+    # than double-counting when a test in the period gets regenerated.
+    score_correct = sum(r.score_correct for r in period_reports)
+    score_total = sum(r.score_total for r in period_reports)
+    score_percent = (score_correct / score_total) if score_total else None
+
+    node_totals: dict[int, list[int]] = defaultdict(lambda: [0, 0])
+    for r in period_reports:
+        for n in r.node_accuracies:
+            agg = node_totals[n.node_id]
+            agg[0] += n.correct_count
+            agg[1] += n.total_count
+
+    node_accuracies = _build_node_accuracy_list(node_totals, node_index)
+    weak_nodes = [n for n in node_accuracies if n.verdict in _ACTIONABLE_VERDICTS]
+
+    return CumulativeReport(
+        student_id=student_id,
+        student_name=student_name,
+        book_id=book_id,
+        report_year=year,
+        report_month=month,
+        tests_included=len(period_reports),
+        score_correct=score_correct,
+        score_total=score_total,
+        score_percent=score_percent,
+        node_accuracies=node_accuracies,
+        weak_nodes=weak_nodes,
+        summary=None,
+    )
+
+
+async def _add_cumulative_summaries(
+    cumulative_reports: list[CumulativeReport], llm: ILlmService, test_id: int
+) -> None:
+    evidence = [
+        StudentReportEvidence(
+            student_id=r.student_id,
+            student_name=r.student_name,
+            score_percent=r.score_percent or 0.0,
+            weak_nodes=_weak_node_evidence(r.weak_nodes),
+        )
+        for r in cumulative_reports
+    ]
+    result = await llm.phrase_student_reports(evidence)
+    if result.is_ok():
+        summaries = result.value
+        for report in cumulative_reports:
+            report.summary = summaries.get(report.student_id)
+    else:
+        logger.warning("Cumulative report narratives failed for test %s: %s", test_id, result.error.message)
+
+
 @router.post("/api/tests/{test_id}/report/generate")
 async def generate_report(
     test_id: int,
@@ -334,6 +403,32 @@ async def generate_report(
     save_result = ReportRepository.save_test_reports(class_report, student_reports)
     if save_result.is_err():
         return _err(save_result.error)
+
+    cumulative_year, cumulative_month = _cumulative_period(test)
+    cumulative_reports = []
+    for score in student_scores:
+        period_result = ReportRepository.get_student_reports_for_period(
+            score.student_id, test.book_id, cumulative_year, cumulative_month
+        )
+        if period_result.is_err():
+            return _err(period_result.error)
+        cumulative_reports.append(
+            _build_cumulative_report(
+                score.student_id,
+                score.student_name,
+                test.book_id,
+                cumulative_year,
+                cumulative_month,
+                period_result.value,
+                node_index,
+            )
+        )
+
+    await _add_cumulative_summaries(cumulative_reports, llm, test_id)
+
+    cumulative_save_result = ReportRepository.save_cumulative_reports(cumulative_reports)
+    if cumulative_save_result.is_err():
+        return _err(cumulative_save_result.error)
 
     response = TestReportResponse(class_report=class_report, student_reports=student_reports)
     return JSONResponse(
@@ -380,6 +475,31 @@ async def get_student_report(
             return _err(scoped.error)
 
     report_result = ReportRepository.get_student_report(test_id, student_id)
+    if report_result.is_err():
+        return _err(report_result.error)
+
+    return JSONResponse(
+        status_code=200, content=success_response(report_result.value.model_dump(mode="json"))
+    )
+
+
+@router.get("/api/students/{student_id}/report/cumulative")
+async def get_cumulative_report(
+    student_id: int,
+    book_id: int,
+    year: int,
+    month: int,
+    current_user: TokenData = Depends(get_current_user),
+) -> JSONResponse:
+    if current_user.role == "student":
+        if current_user.id != student_id:
+            return _err(ERRORS["FORBIDDEN"])
+    else:
+        scoped = ensure_shares_class_with_student_or_admin(student_id, current_user)
+        if scoped.is_err():
+            return _err(scoped.error)
+
+    report_result = ReportRepository.get_cumulative_report(student_id, book_id, year, month)
     if report_result.is_err():
         return _err(report_result.error)
 
