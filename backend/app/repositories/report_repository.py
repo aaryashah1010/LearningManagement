@@ -44,6 +44,7 @@ class IReportRepository(Protocol):
     ) -> Result[None, AppError]: ...
     def get_class_report(self, test_id: int, class_id: int) -> Result["ClassReport", AppError]: ...
     def get_student_report(self, test_id: int, student_id: int) -> Result["StudentReport", AppError]: ...
+    def get_student_reports_for_test(self, test_id: int) -> Result[list["StudentReport"], AppError]: ...
     def get_student_reports_for_period(
         self, student_id: int, book_id: int, year: int, month: int
     ) -> Result[list["StudentReport"], AppError]: ...
@@ -224,6 +225,31 @@ class ReportRepositoryImpl(IReportRepository):
                 weak_nodes=[NodeAccuracy(**n) for n in json.loads(row["weak_nodes"])],
                 summary=row["summary"],
             )
+        )
+
+    def get_student_reports_for_test(self, test_id: int) -> Result[list["StudentReport"], AppError]:
+        from app.models.report import NodeAccuracy, StudentReport
+
+        try:
+            rows = fetch_all("SELECT * FROM student_reports WHERE test_id = %s", (test_id,))
+        except Exception:
+            logger.exception("Error fetching student reports for test")
+            return err(ERRORS["DATABASE_ERROR"])
+        return ok(
+            [
+                StudentReport(
+                    student_id=row["student_id"],
+                    student_name=row["student_name"],
+                    test_id=row["test_id"],
+                    score_correct=row["score_correct"],
+                    score_total=row["score_total"],
+                    score_percent=row["score_percent"],
+                    node_accuracies=[NodeAccuracy(**n) for n in json.loads(row["node_accuracies"])],
+                    weak_nodes=[NodeAccuracy(**n) for n in json.loads(row["weak_nodes"])],
+                    summary=row["summary"],
+                )
+                for row in rows
+            ]
         )
 
     def get_student_reports_for_period(
