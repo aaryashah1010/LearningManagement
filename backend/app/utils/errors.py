@@ -67,6 +67,7 @@ ERRORS: dict[str, AppError] = {
         70002,
         409,
     ),
+    "REPORT_NOT_GENERATED": AppError("No report has been generated for this scope yet", 70003, 404),
     # ─── Files / Storage (8xxxx) ────────────────────────────────────────
     "FILE_TOO_LARGE": AppError("File is too large", 80001, 413),
     "INVALID_FILE_TYPE": AppError("Unsupported file type", 80002, 422),

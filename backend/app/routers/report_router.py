@@ -331,6 +331,10 @@ async def generate_report(
     await _add_class_summary(class_report, llm, test_id)
     await _add_student_summaries(student_reports, llm, test_id)
 
+    save_result = ReportRepository.save_test_reports(class_report, student_reports)
+    if save_result.is_err():
+        return _err(save_result.error)
+
     response = TestReportResponse(class_report=class_report, student_reports=student_reports)
     return JSONResponse(
         status_code=200, content=success_response(response.model_dump(mode="json"), "Report generated")
@@ -341,22 +345,19 @@ async def generate_report(
 async def get_class_report(
     test_id: int,
     current_user: TokenData = Depends(get_current_teacher_or_admin),
-    llm: ILlmService = Depends(get_llm_service),
 ) -> JSONResponse:
     scoped = _ensure_test_scoped(test_id, current_user)
     if scoped.is_err():
         return _err(scoped.error)
     test = scoped.value
 
-    evidence_result = _compute_evidence(test)
-    if evidence_result.is_err():
-        return _err(evidence_result.error)
-    node_index, per_student_nodes, student_scores = evidence_result.value
+    report_result = ReportRepository.get_class_report(test_id, test.class_id)
+    if report_result.is_err():
+        return _err(report_result.error)
 
-    class_report = _build_class_report(test.class_id, test_id, student_scores, per_student_nodes, node_index)
-    await _add_class_summary(class_report, llm, test_id)
-
-    return JSONResponse(status_code=200, content=success_response(class_report.model_dump(mode="json")))
+    return JSONResponse(
+        status_code=200, content=success_response(report_result.value.model_dump(mode="json"))
+    )
 
 
 @router.get("/api/tests/{test_id}/report/students/{student_id}")
@@ -364,7 +365,6 @@ async def get_student_report(
     test_id: int,
     student_id: int,
     current_user: TokenData = Depends(get_current_user),
-    llm: ILlmService = Depends(get_llm_service),
 ) -> JSONResponse:
     test_result = TestRepository.find_by_id(test_id)
     if test_result.is_err():
@@ -379,16 +379,10 @@ async def get_student_report(
         if scoped.is_err():
             return _err(scoped.error)
 
-    evidence_result = _compute_evidence(test)
-    if evidence_result.is_err():
-        return _err(evidence_result.error)
-    node_index, per_student_nodes, student_scores = evidence_result.value
+    report_result = ReportRepository.get_student_report(test_id, student_id)
+    if report_result.is_err():
+        return _err(report_result.error)
 
-    score = next((s for s in student_scores if s.student_id == student_id), None)
-    if score is None:
-        return _err(ERRORS["NO_RESULTS_YET"])
-
-    student_report = _build_student_report(test_id, score, per_student_nodes.get(student_id, {}), node_index)
-    await _add_student_summaries([student_report], llm, test_id)
-
-    return JSONResponse(status_code=200, content=success_response(student_report.model_dump(mode="json")))
+    return JSONResponse(
+        status_code=200, content=success_response(report_result.value.model_dump(mode="json"))
+    )
