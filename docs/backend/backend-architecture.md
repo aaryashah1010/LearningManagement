@@ -173,6 +173,18 @@ Implements `../curriculum-taxonomy.md` § Reports.
 | GET | `/api/students/{id}/report?subject_id=` | teacher, or the student themself | Rollup query (plain joins at the current fixed 3-level depth) → evidence JSON → `llm_service.phrase_report()` for the readable text. Evidence computed first, LLM only phrases it |
 | GET | `/api/classes/{id}/report?subject_id=` | teacher | Same rollup, aggregated across the class's own `answers` rows instead of one student's |
 
+### 2.7 Stats — `/api/stats`
+
+Dashboard summary numbers only — plain `COUNT`/`SUM` aggregates read directly off existing
+tables, computed on every request (small trusted-staff scale, per `database-design.md` §
+Design Decisions — no snapshot/rollup table). Not a general analytics module: no
+date-range params, no per-test breakdowns (that's `/api/tests/{id}/report/*`, §2.6).
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| GET | `/api/stats/admin` | admin | `AdminStats` — `teachers_count` (role = `teacher`, excludes the admin account itself), `students_count`, `classes_count`, `unassigned_classes_count` (no `class_teachers` row), a 6-month `enrollment_trend` (student `created_at`, zero-filled for empty months), and `class_roster` (every class's enrolled count + assigned teacher name(s)) |
+| GET | `/api/stats/teacher` | teacher | `TeacherStats`, scoped to the caller via `class_teachers` — `classes_count`, `published_tests_count`, `needs_review_submissions_count`, and `average_accuracy_percent` (from `processed` submissions' `answers.is_correct`, `null` until any exist) |
+
 ---
 
 ## 3. Auth & Tenancy
