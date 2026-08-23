@@ -274,3 +274,23 @@ CREATE TABLE student_cumulative_reports (
     FOREIGN KEY (book_id) REFERENCES ncert_books(id) ON DELETE CASCADE,
     UNIQUE KEY uq_student_cumulative (student_id, book_id, report_year, report_month)
 ) ENGINE=InnoDB;
+
+-- Class-wide counterpart to student_cumulative_reports, same relationship as
+-- class_reports is to student_reports — aggregated across every student in
+-- the class who has a student_cumulative_reports row for this book/month.
+CREATE TABLE class_cumulative_reports (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    class_id BIGINT UNSIGNED NOT NULL,
+    book_id BIGINT UNSIGNED NOT NULL,
+    report_year SMALLINT UNSIGNED NOT NULL,
+    report_month TINYINT UNSIGNED NOT NULL,
+    students_evaluated INT NOT NULL,
+    average_score_percent FLOAT NULL,
+    node_accuracies JSON NOT NULL,
+    node_student_buckets JSON NOT NULL,
+    summary TEXT NULL,
+    generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
+    FOREIGN KEY (book_id) REFERENCES ncert_books(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_class_cumulative (class_id, book_id, report_year, report_month)
+) ENGINE=InnoDB;

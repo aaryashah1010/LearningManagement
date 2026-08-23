@@ -70,3 +70,15 @@ class CumulativeReport(BaseModel):
     node_accuracies: list[NodeAccuracy]
     weak_nodes: list[NodeAccuracy]
     summary: str | None
+
+
+class ClassCumulativeReport(BaseModel):
+    class_id: int
+    book_id: int
+    report_year: int
+    report_month: int
+    students_evaluated: int
+    average_score_percent: float | None
+    node_accuracies: list[NodeAccuracy]
+    node_student_buckets: list[StudentNodeBucket]
+    summary: str | None

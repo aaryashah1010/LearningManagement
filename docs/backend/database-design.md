@@ -149,6 +149,7 @@ erDiagram
 | 14 | `class_reports` | Persisted class-wide report for one test, generated once by a teacher and read-only after that | test 1→1 |
 | 15 | `student_reports` | Persisted per-student report for one test | test 1→N, student 1→N |
 | 16 | `student_cumulative_reports` | A student's rollup across every test on one book within one calendar month, recomputed whenever any of those tests' reports are (re)generated | student 1→N, book 1→N |
+| 17 | `class_cumulative_reports` | Class-wide counterpart to student_cumulative_reports | class 1→N, book 1→N |
 
 No table stores marks on `curriculum_nodes` — the taxonomy is shared, read-only reference data; every result lives on `answers` and only *references* a node via `questions` → `question_node_map`. See "Results never touch the taxonomy" below.
 
@@ -453,5 +454,25 @@ CREATE TABLE student_cumulative_reports (
     FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
     FOREIGN KEY (book_id) REFERENCES ncert_books(id) ON DELETE CASCADE,
     UNIQUE KEY uq_student_cumulative (student_id, book_id, report_year, report_month)
+) ENGINE=InnoDB;
+
+-- Class-wide counterpart to student_cumulative_reports, same relationship as
+-- class_reports is to student_reports — aggregated across every student in
+-- the class who has a student_cumulative_reports row for this book/month.
+CREATE TABLE class_cumulative_reports (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    class_id BIGINT UNSIGNED NOT NULL,
+    book_id BIGINT UNSIGNED NOT NULL,
+    report_year SMALLINT UNSIGNED NOT NULL,
+    report_month TINYINT UNSIGNED NOT NULL,
+    students_evaluated INT NOT NULL,
+    average_score_percent FLOAT NULL,
+    node_accuracies JSON NOT NULL,
+    node_student_buckets JSON NOT NULL,
+    summary TEXT NULL,
+    generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
+    FOREIGN KEY (book_id) REFERENCES ncert_books(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_class_cumulative (class_id, book_id, report_year, report_month)
 ) ENGINE=InnoDB;
 ```
