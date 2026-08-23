@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { useAuth } from "@/features/auth/hooks/useAuth";
 import { useStudentTests } from "@/features/tests/hooks";
-import { useStudentReport } from "./index";
+import { useCumulativeReport, useStudentReport } from "./index";
+
+const now = new Date();
+const CURRENT_YEAR = now.getFullYear();
+const CURRENT_MONTH = now.getMonth() + 1;
 
 export function useStudentReportPageController() {
   const { user } = useAuth();
@@ -19,6 +23,14 @@ export function useStudentReportPageController() {
 
   const { report, isLoading: isReportLoading, error } = useStudentReport(testId, studentId);
 
+  const bookId = gradedTests.find((t) => t.id === testId)?.book_id ?? null;
+  const { report: cumulativeReport, isLoading: isCumulativeLoading } = useCumulativeReport(
+    studentId,
+    bookId,
+    CURRENT_YEAR,
+    CURRENT_MONTH
+  );
+
   return {
     hasAnyTests: tests.length > 0,
     isTestsLoading,
@@ -28,5 +40,7 @@ export function useStudentReportPageController() {
     report,
     isReportLoading,
     error,
+    cumulativeReport,
+    isCumulativeLoading,
   };
 }

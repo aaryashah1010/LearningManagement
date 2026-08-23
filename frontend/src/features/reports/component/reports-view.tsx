@@ -4,12 +4,24 @@ import { useState } from "react";
 import { AlertIcon, ChevronIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
+import { useCumulativeReport } from "../hooks";
 import { useReportsPageController } from "../hooks/useReportsPageController";
 import type { StudentReport } from "../types";
 import { NodeAccuracyTable, pct } from "./node-accuracy-table";
 
-function StudentReportRow({ report }: { report: StudentReport }) {
+const now = new Date();
+const CURRENT_YEAR = now.getFullYear();
+const CURRENT_MONTH = now.getMonth() + 1;
+
+function StudentReportRow({ report, bookId }: { report: StudentReport; bookId: number | null }) {
   const [expanded, setExpanded] = useState(false);
+  const { report: cumulativeReport, isLoading: isCumulativeLoading } = useCumulativeReport(
+    expanded ? report.student_id : 0,
+    bookId,
+    CURRENT_YEAR,
+    CURRENT_MONTH
+  );
+
   return (
     <li className="py-3">
       <button
@@ -27,13 +39,36 @@ function StudentReportRow({ report }: { report: StudentReport }) {
       </button>
 
       {expanded && (
-        <div className="mt-3 flex flex-col gap-3 rounded-xl bg-ink/[0.02] p-4 dark:bg-paper/[0.03]">
-          {report.summary && <p className="text-sm text-ink/70 dark:text-paper/70">{report.summary}</p>}
-          {report.weak_nodes.length === 0 ? (
-            <p className="text-sm text-ink/50 dark:text-paper/50">No weak topics.</p>
-          ) : (
-            <NodeAccuracyTable nodes={report.weak_nodes} />
-          )}
+        <div className="mt-3 flex flex-col gap-4 rounded-xl bg-ink/[0.02] p-4 dark:bg-paper/[0.03]">
+          <div>
+            {report.summary && <p className="text-sm text-ink/70 dark:text-paper/70">{report.summary}</p>}
+            {report.weak_nodes.length === 0 ? (
+              <p className="text-sm text-ink/50 dark:text-paper/50">No weak topics.</p>
+            ) : (
+              <NodeAccuracyTable nodes={report.weak_nodes} />
+            )}
+          </div>
+
+          <div className="border-t border-ink/8 pt-4 dark:border-paper/8">
+            <p className="font-utility text-xs font-medium uppercase tracking-[0.14em] text-ink/40 dark:text-paper/40">
+              This month
+            </p>
+            {isCumulativeLoading ? (
+              <div className="mt-2 h-12 w-full animate-pulse rounded-lg bg-ink/5 dark:bg-paper/5" />
+            ) : cumulativeReport ? (
+              <div className="mt-2 flex flex-col gap-2">
+                <p className="text-sm text-ink dark:text-paper">
+                  {pct(cumulativeReport.score_percent)} across {cumulativeReport.tests_included} test
+                  {cumulativeReport.tests_included === 1 ? "" : "s"}
+                </p>
+                {cumulativeReport.weak_nodes.length > 0 && (
+                  <NodeAccuracyTable nodes={cumulativeReport.weak_nodes} />
+                )}
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-ink/50 dark:text-paper/50">No cumulative report yet.</p>
+            )}
+          </div>
         </div>
       )}
     </li>
@@ -146,11 +181,39 @@ export function ReportsView() {
           <h3 className="font-display text-lg text-ink dark:text-paper">Students</h3>
           <ul className="mt-2 flex flex-col divide-y divide-ink/8 dark:divide-paper/8">
             {studentReports.map((report) => (
-              <StudentReportRow key={report.student_id} report={report} />
+              <StudentReportRow key={report.student_id} report={report} bookId={controller.bookId} />
             ))}
           </ul>
         </div>
       )}
+
+      <div className="rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate">
+        <h3 className="font-display text-lg text-ink dark:text-paper">Class — this month</h3>
+        {controller.isCumulativeLoading ? (
+          <div className="mt-4 h-24 w-full animate-pulse rounded-xl bg-ink/5 dark:bg-paper/5" />
+        ) : controller.classCumulativeReport ? (
+          <div className="mt-4 grid grid-cols-1 gap-6 xl:grid-cols-[1.3fr_1fr]">
+            <NodeAccuracyTable nodes={controller.classCumulativeReport.node_accuracies} />
+            <div className="flex flex-col gap-2">
+              <p className="font-display text-3xl text-ink dark:text-paper">
+                {pct(controller.classCumulativeReport.average_score_percent)}
+              </p>
+              <p className="text-sm text-ink/55 dark:text-paper/55">
+                {controller.classCumulativeReport.students_evaluated} students evaluated
+              </p>
+              {controller.classCumulativeReport.summary && (
+                <p className="text-sm text-ink/70 dark:text-paper/70">
+                  {controller.classCumulativeReport.summary}
+                </p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-ink/50 dark:text-paper/50">
+            No cumulative report for this month yet.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

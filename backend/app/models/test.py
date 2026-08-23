@@ -33,6 +33,7 @@ class StudentTestSummary(BaseModel):
 
     id: int
     class_id: int
+    book_id: int
     title: str
     published_at: datetime
     submission_id: int | None
