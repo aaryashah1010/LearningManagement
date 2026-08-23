@@ -27,7 +27,9 @@ class LocalStorageService:
         except OSError:
             logger.exception("Error writing file to local storage")
             return err(ERRORS["STORAGE_UPLOAD_FAILED"])
-        return ok(str(path))
+        # A raw filesystem path isn't loadable by a browser — return the URL the
+        # /uploads static mount in main.py actually serves this file at.
+        return ok(f"{settings.BACKEND_URL}/uploads/{key}")
 
 
 class S3StorageService:
