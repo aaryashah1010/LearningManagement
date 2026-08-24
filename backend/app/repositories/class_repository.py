@@ -49,6 +49,9 @@ class IClassRepository(Protocol):
     def unassign_teacher(self, class_id: int, teacher_id: int) -> Result[None, AppError]: ...
     def is_teacher_assigned(self, class_id: int, teacher_id: int) -> Result[bool, AppError]: ...
     def list_assigned_teachers(self, class_id: int) -> Result[list[TeacherView], AppError]: ...
+    def teacher_shares_book_with_student(
+        self, teacher_id: int, student_id: int, book_id: int
+    ) -> Result[bool, AppError]: ...
     def list_assigned_classes(
         self, teacher_id: int, cursor: int | None, limit: int, search: str | None = None
     ) -> Result[Paginated[Class], AppError]: ...
@@ -332,6 +335,22 @@ class ClassRepositoryImpl(IClassRepository):
             return ok([TeacherView(**r) for r in rows])
         except Exception:
             logger.exception("Error listing assigned teachers")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def teacher_shares_book_with_student(
+        self, teacher_id: int, student_id: int, book_id: int
+    ) -> Result[bool, AppError]:
+        try:
+            row = fetch_one(
+                "SELECT 1 FROM tests t "
+                "JOIN class_teachers ct ON ct.class_id = t.class_id "
+                "JOIN class_enrollments ce ON ce.class_id = t.class_id "
+                "WHERE t.book_id = %s AND ct.teacher_id = %s AND ce.student_id = %s LIMIT 1",
+                (book_id, teacher_id, student_id),
+            )
+            return ok(row is not None)
+        except Exception:
+            logger.exception("Error checking teacher/student book overlap")
             return err(ERRORS["DATABASE_ERROR"])
 
     def list_assigned_classes(

@@ -84,7 +84,7 @@ class TestRepositoryImpl(ITestRepository):
             # being skipped outright — same "always show the row" approach as
             # save_pending_for_test's needs_review fallback.
             rows = fetch_all(
-                "SELECT t.id AS id, t.class_id AS class_id, t.title AS title, "
+                "SELECT t.id AS id, t.class_id AS class_id, t.book_id AS book_id, t.title AS title, "
                 "t.published_at AS published_at, "
                 "s.id AS submission_id, s.status AS submission_status, "
                 "SUM(a.is_correct) AS correct_count, COUNT(a.id) AS total_count "
@@ -93,7 +93,7 @@ class TestRepositoryImpl(ITestRepository):
                 "LEFT JOIN submissions s ON s.test_id = t.id AND s.student_id = ce.student_id "
                 "LEFT JOIN answers a ON a.submission_id = s.id "
                 "WHERE ce.student_id = %s "
-                "GROUP BY t.id, t.class_id, t.title, t.published_at, s.id, s.status "
+                "GROUP BY t.id, t.class_id, t.book_id, t.title, t.published_at, s.id, s.status "
                 "ORDER BY t.published_at DESC",
                 (student_id,),
             )

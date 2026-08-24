@@ -55,3 +55,30 @@ class ClassReport(BaseModel):
 class TestReportResponse(BaseModel):
     class_report: ClassReport
     student_reports: list[StudentReport]
+
+
+class CumulativeReport(BaseModel):
+    student_id: int
+    student_name: str
+    book_id: int
+    report_year: int
+    report_month: int
+    tests_included: int
+    score_correct: int
+    score_total: int
+    score_percent: float | None
+    node_accuracies: list[NodeAccuracy]
+    weak_nodes: list[NodeAccuracy]
+    summary: str | None
+
+
+class ClassCumulativeReport(BaseModel):
+    class_id: int
+    book_id: int
+    report_year: int
+    report_month: int
+    students_evaluated: int
+    average_score_percent: float | None
+    node_accuracies: list[NodeAccuracy]
+    node_student_buckets: list[StudentNodeBucket]
+    summary: str | None

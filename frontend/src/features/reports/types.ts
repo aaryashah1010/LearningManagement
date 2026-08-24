@@ -66,3 +66,34 @@ export const TestReportResponseSchema = z.object({
   student_reports: z.array(StudentReportSchema),
 });
 export type TestReportResponse = z.infer<typeof TestReportResponseSchema>;
+
+// Mirrors app/models/report.py CumulativeReport
+export const CumulativeReportSchema = z.object({
+  student_id: z.number(),
+  student_name: z.string(),
+  book_id: z.number(),
+  report_year: z.number(),
+  report_month: z.number(),
+  tests_included: z.number(),
+  score_correct: z.number(),
+  score_total: z.number(),
+  score_percent: z.number().nullable(),
+  node_accuracies: z.array(NodeAccuracySchema),
+  weak_nodes: z.array(NodeAccuracySchema),
+  summary: z.string().nullable(),
+});
+export type CumulativeReport = z.infer<typeof CumulativeReportSchema>;
+
+// Mirrors app/models/report.py ClassCumulativeReport
+export const ClassCumulativeReportSchema = z.object({
+  class_id: z.number(),
+  book_id: z.number(),
+  report_year: z.number(),
+  report_month: z.number(),
+  students_evaluated: z.number(),
+  average_score_percent: z.number().nullable(),
+  node_accuracies: z.array(NodeAccuracySchema),
+  node_student_buckets: z.array(StudentNodeBucketSchema),
+  summary: z.string().nullable(),
+});
+export type ClassCumulativeReport = z.infer<typeof ClassCumulativeReportSchema>;

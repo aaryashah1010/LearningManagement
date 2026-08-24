@@ -3,13 +3,13 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel
 
-from app.database.pool import fetch_all, fetch_one, transaction
+from app.database.pool import execute, fetch_all, fetch_one, transaction
 from app.utils.errors import ERRORS, AppError
 from app.utils.logger import get_logger
 from app.utils.result import Result, err, ok
 
 if TYPE_CHECKING:
-    from app.models.report import ClassReport, StudentReport
+    from app.models.report import ClassCumulativeReport, ClassReport, CumulativeReport, StudentReport
 
 logger = get_logger("report_repository")
 
@@ -44,6 +44,20 @@ class IReportRepository(Protocol):
     ) -> Result[None, AppError]: ...
     def get_class_report(self, test_id: int, class_id: int) -> Result["ClassReport", AppError]: ...
     def get_student_report(self, test_id: int, student_id: int) -> Result["StudentReport", AppError]: ...
+    def get_student_reports_for_period(
+        self, student_id: int, book_id: int, year: int, month: int
+    ) -> Result[list["StudentReport"], AppError]: ...
+    def save_cumulative_reports(self, reports: list["CumulativeReport"]) -> Result[None, AppError]: ...
+    def get_cumulative_report(
+        self, student_id: int, book_id: int, year: int, month: int
+    ) -> Result["CumulativeReport", AppError]: ...
+    def get_cumulative_reports_for_class(
+        self, class_id: int, book_id: int, year: int, month: int
+    ) -> Result[list["CumulativeReport"], AppError]: ...
+    def save_class_cumulative_report(self, report: "ClassCumulativeReport") -> Result[None, AppError]: ...
+    def get_class_cumulative_report(
+        self, class_id: int, book_id: int, year: int, month: int
+    ) -> Result["ClassCumulativeReport", AppError]: ...
 
 
 class ReportRepositoryImpl(IReportRepository):
@@ -208,6 +222,213 @@ class ReportRepositoryImpl(IReportRepository):
                 score_percent=row["score_percent"],
                 node_accuracies=[NodeAccuracy(**n) for n in json.loads(row["node_accuracies"])],
                 weak_nodes=[NodeAccuracy(**n) for n in json.loads(row["weak_nodes"])],
+                summary=row["summary"],
+            )
+        )
+
+    def get_student_reports_for_period(
+        self, student_id: int, book_id: int, year: int, month: int
+    ) -> Result[list["StudentReport"], AppError]:
+        from app.models.report import NodeAccuracy, StudentReport
+
+        try:
+            # year/month here must match report_router._cumulative_period's definition
+            # of a period (currently: calendar month of tests.created_at) — that
+            # function is the single place to change if the boundary ever does.
+            rows = fetch_all(
+                "SELECT sr.* FROM student_reports sr "
+                "JOIN tests t ON t.id = sr.test_id "
+                "WHERE sr.student_id = %s AND t.book_id = %s "
+                "AND YEAR(t.created_at) = %s AND MONTH(t.created_at) = %s",
+                (student_id, book_id, year, month),
+            )
+        except Exception:
+            logger.exception("Error fetching student reports for period")
+            return err(ERRORS["DATABASE_ERROR"])
+        return ok(
+            [
+                StudentReport(
+                    student_id=row["student_id"],
+                    student_name=row["student_name"],
+                    test_id=row["test_id"],
+                    score_correct=row["score_correct"],
+                    score_total=row["score_total"],
+                    score_percent=row["score_percent"],
+                    node_accuracies=[NodeAccuracy(**n) for n in json.loads(row["node_accuracies"])],
+                    weak_nodes=[NodeAccuracy(**n) for n in json.loads(row["weak_nodes"])],
+                    summary=row["summary"],
+                )
+                for row in rows
+            ]
+        )
+
+    def save_cumulative_reports(self, reports: list["CumulativeReport"]) -> Result[None, AppError]:
+        try:
+            with transaction() as conn:
+                cursor = conn.cursor()
+                for report in reports:
+                    cursor.execute(
+                        "INSERT INTO student_cumulative_reports "
+                        "(student_id, book_id, report_year, report_month, student_name, "
+                        "tests_included, score_correct, score_total, score_percent, "
+                        "node_accuracies, weak_nodes, summary) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                        "ON DUPLICATE KEY UPDATE student_name = VALUES(student_name), "
+                        "tests_included = VALUES(tests_included), "
+                        "score_correct = VALUES(score_correct), score_total = VALUES(score_total), "
+                        "score_percent = VALUES(score_percent), "
+                        "node_accuracies = VALUES(node_accuracies), "
+                        "weak_nodes = VALUES(weak_nodes), summary = VALUES(summary), "
+                        "generated_at = CURRENT_TIMESTAMP",
+                        (
+                            report.student_id,
+                            report.book_id,
+                            report.report_year,
+                            report.report_month,
+                            report.student_name,
+                            report.tests_included,
+                            report.score_correct,
+                            report.score_total,
+                            report.score_percent,
+                            json.dumps([n.model_dump(mode="json") for n in report.node_accuracies]),
+                            json.dumps([n.model_dump(mode="json") for n in report.weak_nodes]),
+                            report.summary,
+                        ),
+                    )
+            return ok(None)
+        except Exception:
+            logger.exception("Error saving cumulative reports")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def get_cumulative_report(
+        self, student_id: int, book_id: int, year: int, month: int
+    ) -> Result["CumulativeReport", AppError]:
+        from app.models.report import CumulativeReport, NodeAccuracy
+
+        try:
+            row = fetch_one(
+                "SELECT * FROM student_cumulative_reports "
+                "WHERE student_id = %s AND book_id = %s AND report_year = %s AND report_month = %s",
+                (student_id, book_id, year, month),
+            )
+        except Exception:
+            logger.exception("Error fetching cumulative report")
+            return err(ERRORS["DATABASE_ERROR"])
+        if row is None:
+            return err(ERRORS["REPORT_NOT_GENERATED"])
+        return ok(
+            CumulativeReport(
+                student_id=row["student_id"],
+                student_name=row["student_name"],
+                book_id=row["book_id"],
+                report_year=row["report_year"],
+                report_month=row["report_month"],
+                tests_included=row["tests_included"],
+                score_correct=row["score_correct"],
+                score_total=row["score_total"],
+                score_percent=row["score_percent"],
+                node_accuracies=[NodeAccuracy(**n) for n in json.loads(row["node_accuracies"])],
+                weak_nodes=[NodeAccuracy(**n) for n in json.loads(row["weak_nodes"])],
+                summary=row["summary"],
+            )
+        )
+
+    def get_cumulative_reports_for_class(
+        self, class_id: int, book_id: int, year: int, month: int
+    ) -> Result[list["CumulativeReport"], AppError]:
+        from app.models.report import CumulativeReport, NodeAccuracy
+
+        try:
+            # Every currently-enrolled student with a cumulative row for this book/month
+            # — not just students from whichever test triggered this generate call, so a
+            # student absent from today's test but present earlier this month still counts.
+            rows = fetch_all(
+                "SELECT scr.* FROM student_cumulative_reports scr "
+                "JOIN class_enrollments ce ON ce.student_id = scr.student_id "
+                "WHERE ce.class_id = %s AND scr.book_id = %s "
+                "AND scr.report_year = %s AND scr.report_month = %s",
+                (class_id, book_id, year, month),
+            )
+        except Exception:
+            logger.exception("Error fetching cumulative reports for class")
+            return err(ERRORS["DATABASE_ERROR"])
+        return ok(
+            [
+                CumulativeReport(
+                    student_id=row["student_id"],
+                    student_name=row["student_name"],
+                    book_id=row["book_id"],
+                    report_year=row["report_year"],
+                    report_month=row["report_month"],
+                    tests_included=row["tests_included"],
+                    score_correct=row["score_correct"],
+                    score_total=row["score_total"],
+                    score_percent=row["score_percent"],
+                    node_accuracies=[NodeAccuracy(**n) for n in json.loads(row["node_accuracies"])],
+                    weak_nodes=[NodeAccuracy(**n) for n in json.loads(row["weak_nodes"])],
+                    summary=row["summary"],
+                )
+                for row in rows
+            ]
+        )
+
+    def save_class_cumulative_report(self, report: "ClassCumulativeReport") -> Result[None, AppError]:
+        try:
+            execute(
+                "INSERT INTO class_cumulative_reports "
+                "(class_id, book_id, report_year, report_month, students_evaluated, "
+                "average_score_percent, node_accuracies, node_student_buckets, summary) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE students_evaluated = VALUES(students_evaluated), "
+                "average_score_percent = VALUES(average_score_percent), "
+                "node_accuracies = VALUES(node_accuracies), "
+                "node_student_buckets = VALUES(node_student_buckets), "
+                "summary = VALUES(summary), generated_at = CURRENT_TIMESTAMP",
+                (
+                    report.class_id,
+                    report.book_id,
+                    report.report_year,
+                    report.report_month,
+                    report.students_evaluated,
+                    report.average_score_percent,
+                    json.dumps([n.model_dump(mode="json") for n in report.node_accuracies]),
+                    json.dumps([b.model_dump(mode="json") for b in report.node_student_buckets]),
+                    report.summary,
+                ),
+            )
+            return ok(None)
+        except Exception:
+            logger.exception("Error saving class cumulative report")
+            return err(ERRORS["DATABASE_ERROR"])
+
+    def get_class_cumulative_report(
+        self, class_id: int, book_id: int, year: int, month: int
+    ) -> Result["ClassCumulativeReport", AppError]:
+        from app.models.report import ClassCumulativeReport, NodeAccuracy, StudentNodeBucket
+
+        try:
+            row = fetch_one(
+                "SELECT * FROM class_cumulative_reports "
+                "WHERE class_id = %s AND book_id = %s AND report_year = %s AND report_month = %s",
+                (class_id, book_id, year, month),
+            )
+        except Exception:
+            logger.exception("Error fetching class cumulative report")
+            return err(ERRORS["DATABASE_ERROR"])
+        if row is None:
+            return err(ERRORS["REPORT_NOT_GENERATED"])
+        return ok(
+            ClassCumulativeReport(
+                class_id=row["class_id"],
+                book_id=row["book_id"],
+                report_year=row["report_year"],
+                report_month=row["report_month"],
+                students_evaluated=row["students_evaluated"],
+                average_score_percent=row["average_score_percent"],
+                node_accuracies=[NodeAccuracy(**n) for n in json.loads(row["node_accuracies"])],
+                node_student_buckets=[
+                    StudentNodeBucket(**b) for b in json.loads(row["node_student_buckets"])
+                ],
                 summary=row["summary"],
             )
         )

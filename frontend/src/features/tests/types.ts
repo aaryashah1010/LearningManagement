@@ -100,6 +100,7 @@ export type QuestionPaperUploadResult = z.infer<typeof QuestionPaperUploadResult
 export const StudentTestSummarySchema = z.object({
   id: z.number(),
   class_id: z.number(),
+  book_id: z.number(),
   title: z.string(),
   published_at: z.string(),
   submission_id: z.number().nullable(),

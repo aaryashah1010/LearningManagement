@@ -5,7 +5,11 @@ import { useClasses } from "@/features/classes/hooks";
 import { useTestsForClass } from "@/features/tests/hooks";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { RequestError } from "@/lib/api";
-import { useGenerateTestReport } from "./index";
+import { useClassCumulativeReport, useGenerateTestReport } from "./index";
+
+const now = new Date();
+const CURRENT_YEAR = now.getFullYear();
+const CURRENT_MONTH = now.getMonth() + 1;
 
 export function useReportsPageController() {
   const [classSearchInput, setClassSearchInput] = useState("");
@@ -30,6 +34,14 @@ export function useReportsPageController() {
       : (publishedTests.at(0)?.id ?? null);
 
   const { generateReport, report, isGenerating } = useGenerateTestReport();
+
+  const bookId = tests.find((t) => t.id === testId)?.book_id ?? null;
+  const { report: classCumulativeReport, isLoading: isCumulativeLoading } = useClassCumulativeReport(
+    classId,
+    bookId,
+    CURRENT_YEAR,
+    CURRENT_MONTH
+  );
 
   function setClassId(id: number) {
     setSelectedClassId(id);
@@ -63,5 +75,8 @@ export function useReportsPageController() {
     isGenerating,
     error,
     handleGenerate,
+    bookId,
+    classCumulativeReport,
+    isCumulativeLoading,
   };
 }
