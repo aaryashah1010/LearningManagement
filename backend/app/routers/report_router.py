@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from app.config.settings import settings
 from app.middleware.auth import get_current_teacher_or_admin, get_current_user
 from app.models.curriculum_node import ChapterNode
-from app.models.llm import ClassReportEvidence, StudentReportEvidence, WeakNodeEvidence
+from app.models.llm import ClassReportEvidence, WeakNodeEvidence
 from app.models.report import (
     ClassCumulativeReport,
     ClassReport,
@@ -28,7 +28,7 @@ from app.utils.errors import ERRORS, AppError
 from app.utils.logger import get_logger
 from app.utils.responses import error_response, success_response
 from app.utils.result import Result, err, ok
-from app.utils.scoping import ensure_class_assigned_or_admin, ensure_shares_class_with_student_or_admin
+from app.utils.scoping import ensure_class_assigned_or_admin, ensure_shares_book_with_student_or_admin
 
 router = APIRouter(tags=["reports"])
 logger = get_logger("report_router")
@@ -286,27 +286,6 @@ async def _add_class_summary(
         logger.warning("Class report narrative failed for test %s: %s", test_id, result.error.message)
 
 
-async def _add_student_summaries(
-    student_reports: list[StudentReport], llm: ILlmService, test_id: int
-) -> None:
-    evidence = [
-        StudentReportEvidence(
-            student_id=r.student_id,
-            student_name=r.student_name,
-            score_percent=r.score_percent or 0.0,
-            weak_nodes=_weak_node_evidence(r.weak_nodes),
-        )
-        for r in student_reports
-    ]
-    result = await llm.phrase_student_reports(evidence)
-    if result.is_ok():
-        summaries = result.value
-        for report in student_reports:
-            report.summary = summaries.get(report.student_id)
-    else:
-        logger.warning("Student report narratives failed for test %s: %s", test_id, result.error.message)
-
-
 def _build_cumulative_report(
     student_id: int,
     student_name: str,
@@ -411,27 +390,6 @@ def _build_class_cumulative_report(
     )
 
 
-async def _add_cumulative_summaries(
-    cumulative_reports: list[CumulativeReport], llm: ILlmService, test_id: int
-) -> None:
-    evidence = [
-        StudentReportEvidence(
-            student_id=r.student_id,
-            student_name=r.student_name,
-            score_percent=r.score_percent or 0.0,
-            weak_nodes=_weak_node_evidence(r.weak_nodes),
-        )
-        for r in cumulative_reports
-    ]
-    result = await llm.phrase_student_reports(evidence)
-    if result.is_ok():
-        summaries = result.value
-        for report in cumulative_reports:
-            report.summary = summaries.get(report.student_id)
-    else:
-        logger.warning("Cumulative report narratives failed for test %s: %s", test_id, result.error.message)
-
-
 @router.post("/api/tests/{test_id}/report/generate")
 async def generate_report(
     test_id: int,
@@ -464,7 +422,6 @@ async def generate_report(
     class_report = _build_class_report(test.class_id, test_id, student_scores, per_student_nodes, node_index)
 
     await _add_class_summary(class_report, llm, test_id)
-    await _add_student_summaries(student_reports, llm, test_id)
 
     save_result = ReportRepository.save_test_reports(class_report, student_reports)
     if save_result.is_err():
@@ -489,8 +446,6 @@ async def generate_report(
                 node_index,
             )
         )
-
-    await _add_cumulative_summaries(cumulative_reports, llm, test_id)
 
     cumulative_save_result = ReportRepository.save_cumulative_reports(cumulative_reports)
     if cumulative_save_result.is_err():
@@ -578,7 +533,7 @@ async def get_cumulative_report(
         if current_user.id != student_id:
             return _err(ERRORS["FORBIDDEN"])
     else:
-        scoped = ensure_shares_class_with_student_or_admin(student_id, current_user)
+        scoped = ensure_shares_book_with_student_or_admin(student_id, book_id, current_user)
         if scoped.is_err():
             return _err(scoped.error)
 

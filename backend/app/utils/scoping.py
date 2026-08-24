@@ -15,14 +15,14 @@ def ensure_class_assigned_or_admin(class_id: int, current_user: TokenData) -> Re
     return ok(None)
 
 
-def ensure_shares_class_with_student_or_admin(
-    student_id: int, current_user: TokenData
+def ensure_shares_book_with_student_or_admin(
+    student_id: int, book_id: int, current_user: TokenData
 ) -> Result[None, AppError]:
     # Unlike ensure_class_assigned_or_admin, not scoped to one class_id — for data
     # spanning whatever classes a student has been in (e.g. a cumulative report).
     if current_user.role == "admin":
         return ok(None)
-    shares = ClassRepository.teacher_shares_class_with_student(current_user.id, student_id)
+    shares = ClassRepository.teacher_shares_book_with_student(current_user.id, student_id, book_id)
     if shares.is_err():
         return err(shares.error)
     if not shares.value:
