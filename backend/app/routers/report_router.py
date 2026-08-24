@@ -493,6 +493,25 @@ async def get_class_report(
     )
 
 
+@router.get("/api/tests/{test_id}/report/students")
+async def get_student_reports(
+    test_id: int,
+    current_user: TokenData = Depends(get_current_teacher_or_admin),
+) -> JSONResponse:
+    scoped = _ensure_test_scoped(test_id, current_user)
+    if scoped.is_err():
+        return _err(scoped.error)
+
+    reports_result = ReportRepository.get_student_reports_for_test(test_id)
+    if reports_result.is_err():
+        return _err(reports_result.error)
+
+    return JSONResponse(
+        status_code=200,
+        content=success_response([r.model_dump(mode="json") for r in reports_result.value]),
+    )
+
+
 @router.get("/api/tests/{test_id}/report/students/{student_id}")
 async def get_student_report(
     test_id: int,
@@ -564,4 +583,26 @@ async def get_class_cumulative_report(
 
     return JSONResponse(
         status_code=200, content=success_response(report_result.value.model_dump(mode="json"))
+    )
+
+
+@router.get("/api/classes/{class_id}/report/cumulative/students")
+async def get_class_cumulative_student_reports(
+    class_id: int,
+    book_id: int,
+    year: int,
+    month: int,
+    current_user: TokenData = Depends(get_current_teacher_or_admin),
+) -> JSONResponse:
+    scoped = ensure_class_assigned_or_admin(class_id, current_user)
+    if scoped.is_err():
+        return _err(scoped.error)
+
+    reports_result = ReportRepository.get_cumulative_reports_for_class(class_id, book_id, year, month)
+    if reports_result.is_err():
+        return _err(reports_result.error)
+
+    return JSONResponse(
+        status_code=200,
+        content=success_response([r.model_dump(mode="json") for r in reports_result.value]),
     )

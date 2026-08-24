@@ -5,11 +5,9 @@ import { useClasses } from "@/features/classes/hooks";
 import { useTestsForClass } from "@/features/tests/hooks";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { RequestError } from "@/lib/api";
-import { useClassCumulativeReport, useGenerateTestReport } from "./index";
+import { useClassReport, useGenerateTestReport, useStudentReports } from "./index";
 
-const now = new Date();
-const CURRENT_YEAR = now.getFullYear();
-const CURRENT_MONTH = now.getMonth() + 1;
+export type ReportTab = "class" | "student";
 
 export function useReportsPageController() {
   const [classSearchInput, setClassSearchInput] = useState("");
@@ -33,14 +31,16 @@ export function useReportsPageController() {
       ? selectedTestId
       : (publishedTests.at(0)?.id ?? null);
 
-  const { generateReport, report, isGenerating } = useGenerateTestReport();
+  const [activeTab, setActiveTab] = useState<ReportTab>("class");
 
-  const bookId = tests.find((t) => t.id === testId)?.book_id ?? null;
-  const { report: classCumulativeReport, isLoading: isCumulativeLoading } = useClassCumulativeReport(
-    classId,
-    bookId,
-    CURRENT_YEAR,
-    CURRENT_MONTH
+  const { generateReport, isGenerating } = useGenerateTestReport();
+  const { report: classReport, isLoading: isClassReportLoading } = useClassReport(
+    testId,
+    activeTab === "class"
+  );
+  const { reports: studentReports, isLoading: isStudentReportsLoading } = useStudentReports(
+    testId,
+    activeTab === "student"
   );
 
   function setClassId(id: number) {
@@ -71,12 +71,14 @@ export function useReportsPageController() {
     publishedTests,
     testId,
     setTestId: setSelectedTestId,
-    report,
+    classReport,
+    isClassReportLoading,
+    studentReports,
+    isStudentReportsLoading,
     isGenerating,
     error,
     handleGenerate,
-    bookId,
-    classCumulativeReport,
-    isCumulativeLoading,
+    activeTab,
+    setActiveTab,
   };
 }

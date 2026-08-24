@@ -55,69 +55,20 @@ export function StudentReportView() {
         <div className="h-40 w-full animate-pulse rounded-2xl bg-ink/5 dark:bg-paper/5" />
       ) : (
         report && (
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.3fr_1fr]">
-            <div className="rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate">
+          <div className="rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate">
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
               <h3 className="font-display text-lg text-ink dark:text-paper">Topic accuracy</h3>
-              <div className="mt-4">
-                <NodeAccuracyTable nodes={report.node_accuracies} />
-              </div>
+              <p className="text-sm text-ink/55 dark:text-paper/55">
+                <span className="font-display text-2xl text-ink dark:text-paper">{pct(report.score_percent)}</span>{" "}
+                {report.score_correct} of {report.score_total} correct
+              </p>
             </div>
-
-            <div className="flex flex-col gap-4 rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate">
-              <div>
-                <p className="font-utility text-xs font-medium uppercase tracking-[0.14em] text-ink/40 dark:text-paper/40">
-                  Your score
-                </p>
-                <p className="mt-1 font-display text-3xl text-ink dark:text-paper">{pct(report.score_percent)}</p>
-                <p className="mt-1 text-sm text-ink/55 dark:text-paper/55">
-                  {report.score_correct} of {report.score_total} correct
-                </p>
-              </div>
-              {report.summary && <p className="text-sm text-ink/70 dark:text-paper/70">{report.summary}</p>}
-              {report.weak_nodes.length > 0 && (
-                <div>
-                  <p className="font-utility text-xs font-medium uppercase tracking-[0.14em] text-ink/40 dark:text-paper/40">
-                    Focus on
-                  </p>
-                  <div className="mt-2">
-                    <NodeAccuracyTable nodes={report.weak_nodes} />
-                  </div>
-                </div>
-              )}
+            <div className="mt-4">
+              <NodeAccuracyTable nodes={report.node_accuracies} />
             </div>
           </div>
         )
       )}
-
-      <div className="rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate">
-        <h3 className="font-display text-lg text-ink dark:text-paper">This month</h3>
-        {controller.isCumulativeLoading ? (
-          <div className="mt-4 h-24 w-full animate-pulse rounded-xl bg-ink/5 dark:bg-paper/5" />
-        ) : controller.cumulativeReport ? (
-          <div className="mt-4 flex flex-col gap-4">
-            <div>
-              <p className="font-display text-3xl text-ink dark:text-paper">
-                {pct(controller.cumulativeReport.score_percent)}
-              </p>
-              <p className="mt-1 text-sm text-ink/55 dark:text-paper/55">
-                {controller.cumulativeReport.score_correct} of {controller.cumulativeReport.score_total} correct
-                across {controller.cumulativeReport.tests_included} test
-                {controller.cumulativeReport.tests_included === 1 ? "" : "s"}
-              </p>
-            </div>
-            {controller.cumulativeReport.summary && (
-              <p className="text-sm text-ink/70 dark:text-paper/70">{controller.cumulativeReport.summary}</p>
-            )}
-            {controller.cumulativeReport.weak_nodes.length > 0 && (
-              <NodeAccuracyTable nodes={controller.cumulativeReport.weak_nodes} />
-            )}
-          </div>
-        ) : (
-          <p className="mt-2 text-sm text-ink/50 dark:text-paper/50">
-            No cumulative report for this month yet.
-          </p>
-        )}
-      </div>
     </div>
   );
 }

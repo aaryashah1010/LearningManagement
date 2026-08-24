@@ -114,6 +114,11 @@ function SubmissionBreakdown({ submissionId }: { submissionId: number }) {
         </p>
       </div>
 
+      <div className="overflow-hidden rounded-2xl border border-ink/10 dark:border-paper/10">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={submission.image_url} alt="Your scanned answer sheet" className="w-full" />
+      </div>
+
       <div className="rounded-2xl border border-ink/10 bg-paper p-6 dark:border-paper/10 dark:bg-slate">
         <p className="font-utility text-xs font-medium uppercase tracking-[0.14em] text-ink/40 dark:text-paper/40">
           Answers
