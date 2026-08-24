@@ -21,6 +21,7 @@ export function useGenerateTestReport() {
       queryClient.invalidateQueries({ queryKey: ["studentReports"] });
       queryClient.invalidateQueries({ queryKey: ["classCumulativeReport"] });
       queryClient.invalidateQueries({ queryKey: ["cumulativeReport"] });
+      queryClient.invalidateQueries({ queryKey: ["cumulativeReportsForClass"] });
     },
   });
   return { generateReport: mutateAsync, isGenerating: isPending, error };
