@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { ClassesIcon, StudentsIcon, TeachersIcon } from "@/components/icons";
+import { AlertIcon, CheckIcon, ClassesIcon, StudentsIcon, TeachersIcon } from "@/components/icons";
 import { StatTile } from "@/components/molecules/stat-tile";
-import { useClasses } from "@/features/classes/hooks";
+import { ClassRosterChart } from "@/features/stats/component/class-roster-chart";
+import { TrendChart } from "@/features/stats/component/trend-chart";
+import { useAdminStats } from "@/features/stats/hooks";
 
 const QUICK_LINKS = [
   { href: "/admin/classes", label: "Create a class", icon: ClassesIcon },
@@ -12,17 +14,62 @@ const QUICK_LINKS = [
 ];
 
 export function DashboardOverview() {
-  const { classes, hasNextPage, isLoading } = useClasses();
+  const { stats, isLoading } = useAdminStats();
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatTile
+          label="Teachers"
+          value={isLoading ? "—" : String(stats?.teachers_count ?? 0)}
+          icon={<TeachersIcon className="h-4 w-4" />}
+        />
+        <StatTile
+          label="Students"
+          value={isLoading ? "—" : String(stats?.students_count ?? 0)}
+          icon={<StudentsIcon className="h-4 w-4" />}
+        />
         <StatTile
           label="Classes"
-          value={isLoading ? "—" : `${classes.length}${hasNextPage ? "+" : ""}`}
+          value={isLoading ? "—" : String(stats?.classes_count ?? 0)}
           icon={<ClassesIcon className="h-4 w-4" />}
         />
+        <StatTile
+          label="Needs attention"
+          value={isLoading ? "—" : String(stats?.unassigned_classes_count ?? 0)}
+          delta={
+            !isLoading
+              ? {
+                  text:
+                    (stats?.unassigned_classes_count ?? 0) > 0
+                      ? "Class without a teacher"
+                      : "Every class is staffed",
+                  direction: (stats?.unassigned_classes_count ?? 0) > 0 ? "down" : "flat",
+                }
+              : undefined
+          }
+          status={!isLoading && (stats?.unassigned_classes_count ?? 0) > 0 ? "attention" : "good"}
+          icon={
+            !isLoading && (stats?.unassigned_classes_count ?? 0) > 0 ? (
+              <AlertIcon className="h-4 w-4" />
+            ) : (
+              <CheckIcon className="h-4 w-4" />
+            )
+          }
+        />
       </div>
+
+      {!isLoading && stats && (
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.1fr_1fr]">
+          <TrendChart
+            title="Enrollment growth"
+            periodLabel="Last 6 months"
+            unitLabel="students"
+            data={stats.enrollment_trend.map((p) => ({ label: p.label, value: p.count }))}
+          />
+          <ClassRosterChart title="Class roster" rows={stats.class_roster} />
+        </div>
+      )}
 
       <div>
         <p className="font-utility text-xs font-medium uppercase tracking-[0.14em] text-ink/40 dark:text-paper/40">
@@ -43,11 +90,6 @@ export function DashboardOverview() {
           ))}
         </div>
       </div>
-
-      <p className="max-w-xl text-sm text-ink/45 dark:text-paper/45">
-        Teacher and student totals aren&rsquo;t shown yet — the backend doesn&rsquo;t expose
-        an aggregate stats endpoint.
-      </p>
     </div>
   );
 }

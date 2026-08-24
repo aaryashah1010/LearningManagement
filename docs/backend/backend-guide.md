@@ -52,7 +52,8 @@ app/
 │   ├── question_repository.py
 │   ├── submission_repository.py
 │   ├── answer_repository.py
-│   └── report_repository.py                # read-only rollup queries
+│   ├── report_repository.py                # read-only rollup queries
+│   └── stats_repository.py                 # read-only dashboard aggregates (counts, enrollment trend)
 ├── routers/
 │   ├── auth_router.py                      # /api/auth — login, refresh-token, password
 │   ├── accounts_router.py                  # /api/accounts — teacher/student account creation, separate endpoints (see accounts-and-roster.md)
@@ -61,7 +62,8 @@ app/
 │   ├── book_router.py                      # curriculum taxonomy — GET only, data is developer-seeded
 │   ├── test_router.py
 │   ├── submission_router.py
-│   └── report_router.py
+│   ├── report_router.py
+│   └── stats_router.py
 ├── services/
 │   ├── bubble/bubble_service.py             # IBubbleService — see § Service Layer & Provider Abstraction below
 │   ├── ocr/ocr_service.py                   # IOcrService — handwriting OCR, separate from bubble reading

@@ -1,21 +1,50 @@
 "use client";
 
 import Link from "next/link";
-import { ClassesIcon } from "@/components/icons";
+import { ClassesIcon, ReportsIcon, SubmissionsIcon, TestsIcon } from "@/components/icons";
 import { StatTile } from "@/components/molecules/stat-tile";
-import { useClasses } from "@/features/classes/hooks";
+import { useTeacherStats } from "@/features/stats/hooks";
 
 export function TeacherDashboardOverview() {
-  const { classes, hasNextPage, isLoading } = useClasses();
+  const { stats, isLoading } = useTeacherStats();
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
           label="My classes"
-          value={isLoading ? "—" : `${classes.length}${hasNextPage ? "+" : ""}`}
+          value={isLoading ? "—" : String(stats?.classes_count ?? 0)}
           icon={<ClassesIcon className="h-4 w-4" />}
         />
+        <StatTile
+          label="Published tests"
+          value={isLoading ? "—" : String(stats?.published_tests_count ?? 0)}
+          icon={<TestsIcon className="h-4 w-4" />}
+        />
+        <StatTile
+          label="Needs review"
+          value={isLoading ? "—" : String(stats?.needs_review_submissions_count ?? 0)}
+          status={!isLoading && (stats?.needs_review_submissions_count ?? 0) > 0 ? "attention" : "good"}
+          delta={
+            !isLoading
+              ? {
+                  text:
+                    (stats?.needs_review_submissions_count ?? 0) > 0
+                      ? "Submissions awaiting review"
+                      : "All caught up",
+                  direction: (stats?.needs_review_submissions_count ?? 0) > 0 ? "down" : "flat",
+                }
+              : undefined
+          }
+          icon={<SubmissionsIcon className="h-4 w-4" />}
+        />
+        {!isLoading && stats?.average_accuracy_percent !== null && stats?.average_accuracy_percent !== undefined && (
+          <StatTile
+            label="Avg accuracy"
+            value={`${Math.round(stats.average_accuracy_percent)}%`}
+            icon={<ReportsIcon className="h-4 w-4" />}
+          />
+        )}
       </div>
 
       <Link
@@ -27,11 +56,6 @@ export function TeacherDashboardOverview() {
         </span>
         <span className="font-medium text-ink dark:text-paper">View your classes</span>
       </Link>
-
-      <p className="max-w-xl text-sm text-ink/45 dark:text-paper/45">
-        Test, submission and report totals aren&rsquo;t shown yet — that part of the backend
-        hasn&rsquo;t been built.
-      </p>
     </div>
   );
 }
