@@ -63,9 +63,6 @@ export function StudentReportView() {
                 {report.score_correct} of {report.score_total} correct
               </p>
             </div>
-            {report.summary && (
-              <p className="mt-2 text-sm text-ink/70 dark:text-paper/70">{report.summary}</p>
-            )}
             <div className="mt-4">
               <NodeAccuracyTable nodes={report.node_accuracies} />
             </div>

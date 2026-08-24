@@ -34,7 +34,6 @@ function StudentCumulativeRow({ report }: { report: CumulativeReport }) {
 
       {expanded && (
         <div className="mt-3 flex flex-col gap-3 rounded-xl bg-ink/[0.02] p-4 dark:bg-paper/[0.03]">
-          {report.summary && <p className="text-sm text-ink/70 dark:text-paper/70">{report.summary}</p>}
           <NodeAccuracyTable nodes={report.node_accuracies} />
         </div>
       )}

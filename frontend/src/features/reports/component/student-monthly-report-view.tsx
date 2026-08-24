@@ -79,9 +79,6 @@ export function StudentMonthlyReportView() {
               {controller.report.tests_included} test{controller.report.tests_included === 1 ? "" : "s"}
             </p>
           </div>
-          {controller.report.summary && (
-            <p className="mt-2 text-sm text-ink/70 dark:text-paper/70">{controller.report.summary}</p>
-          )}
           <div className="mt-4">
             <NodeAccuracyTable nodes={controller.report.node_accuracies} />
           </div>

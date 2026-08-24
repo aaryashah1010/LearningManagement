@@ -33,7 +33,6 @@ function StudentReportRow({ report }: { report: StudentReport }) {
 
       {expanded && (
         <div className="mt-3 rounded-xl bg-ink/[0.02] p-4 dark:bg-paper/[0.03]">
-          {report.summary && <p className="text-sm text-ink/70 dark:text-paper/70">{report.summary}</p>}
           {report.weak_nodes.length === 0 ? (
             <p className="text-sm text-ink/50 dark:text-paper/50">No weak topics.</p>
           ) : (
