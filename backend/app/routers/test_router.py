@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, UploadFile
 from fastapi.responses import JSONResponse
 
-from app.middleware.auth import get_current_teacher_or_admin
+from app.middleware.auth import get_current_student, get_current_teacher_or_admin
 from app.models.llm import QuestionToMap
 from app.models.question import BulkQuestionsRequest, CreateQuestionData, SetQuestionNodeRequest
 from app.models.test import CreateTestData
@@ -111,6 +111,20 @@ async def get_test(
     if scoped.is_err():
         return _err(scoped.error)
     return JSONResponse(status_code=200, content=success_response(scoped.value.model_dump(mode="json")))
+
+
+@router.get("/api/students/{student_id}/tests")
+async def list_tests_for_student(
+    student_id: int, current_user: TokenData = Depends(get_current_student)
+) -> JSONResponse:
+    if current_user.id != student_id:
+        return _err(ERRORS["FORBIDDEN"])
+    result = TestRepository.list_published_for_student(student_id)
+    if result.is_err():
+        return _err(result.error)
+    return JSONResponse(
+        status_code=200, content=success_response([t.model_dump(mode="json") for t in result.value])
+    )
 
 
 @router.post("/api/tests/{test_id}/questions/bulk")
