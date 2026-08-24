@@ -1,9 +1,11 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -46,6 +48,10 @@ app.add_middleware(
 )
 
 register_error_handlers(app)
+
+if settings.STORAGE_PROVIDER == "local":
+    Path(settings.LOCAL_STORAGE_PATH).mkdir(parents=True, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=settings.LOCAL_STORAGE_PATH), name="uploads")
 
 
 @app.exception_handler(RateLimitExceeded)

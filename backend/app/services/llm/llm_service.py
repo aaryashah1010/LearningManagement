@@ -200,7 +200,9 @@ class OpenAiCompatibleLlmService:
                 NodeMapping(
                     question_id=int(m["question_id"]),
                     node_id=int(m["node_id"]),
-                    reasoning=str(m["reasoning"]),
+                    # Prompting aid only — never read downstream — so a model that
+                    # omits it shouldn't fail mapping for every question in the batch.
+                    reasoning=str(m.get("reasoning", "")),
                 )
                 for m in data["mappings"]
             ]

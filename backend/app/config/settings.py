@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     ENV: Literal["development", "test", "production"] = "development"
     PORT: int = 8000
     FRONTEND_URL: str = "http://localhost:3000"
+    # Used to build absolute URLs for locally-stored files (STORAGE_PROVIDER=local) —
+    # a browser can't load a raw filesystem path, so LocalStorageService needs a real
+    # origin to serve /uploads from.
+    BACKEND_URL: str = "http://localhost:8000"
 
     # Database
     DB_HOST: str = "localhost"

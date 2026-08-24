@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, UploadFile
 from fastapi.responses import JSONResponse
 
@@ -184,23 +186,32 @@ async def upload_question_paper(
         return _err(parsed_result.error)
     parsed = parsed_result.value
 
-    questions_to_create: list[CreateQuestionData] = []
+    # Diagram uploads don't depend on each other — run them concurrently instead of
+    # one at a time, so a paper with several diagram questions doesn't wait N times
+    # the single-upload latency before this (still-synchronous) response can return.
     images_by_question_number: dict[int, bytes] = {}
+    image_questions = [q for q in parsed.questions if q.image is not None]
+    upload_results = await asyncio.gather(
+        *(
+            storage.upload(q.image, f"questions/test-{test_id}/q{q.question_number}.png", "image/png")
+            for q in image_questions
+        )
+    )
+    image_url_by_question_number: dict[int, str] = {}
+    for question, upload_result in zip(image_questions, upload_results, strict=True):
+        images_by_question_number[question.question_number] = question.image
+        if upload_result.is_ok():
+            image_url_by_question_number[question.question_number] = upload_result.value
+        else:
+            logger.warning(
+                "Failed to upload image for test %s question %s: %s",
+                test_id,
+                question.question_number,
+                upload_result.error.message,
+            )
+
+    questions_to_create: list[CreateQuestionData] = []
     for question in parsed.questions:
-        image_url = None
-        if question.image is not None:
-            images_by_question_number[question.question_number] = question.image
-            key = f"questions/test-{test_id}/q{question.question_number}.png"
-            upload_result = await storage.upload(question.image, key, "image/png")
-            if upload_result.is_ok():
-                image_url = upload_result.value
-            else:
-                logger.warning(
-                    "Failed to upload image for test %s question %s: %s",
-                    test_id,
-                    question.question_number,
-                    upload_result.error.message,
-                )
         questions_to_create.append(
             CreateQuestionData(
                 question_number=question.question_number,
@@ -210,7 +221,7 @@ async def upload_question_paper(
                 option_b=question.option_b,
                 option_c=question.option_c,
                 option_d=question.option_d,
-                image_url=image_url,
+                image_url=image_url_by_question_number.get(question.question_number),
             )
         )
 
